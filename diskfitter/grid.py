@@ -33,6 +33,7 @@ class Nested2DGrid(object):
         ye = np.hstack([y - self.dy * 0.5, y[-1] + self.dy * 0.5])
         self.x, self.y = x, y
         self.xe, self.ye = xe, ye
+        self.decimals = precision
 
 
     def check_symmetry(self, decimals = 7):
@@ -50,9 +51,13 @@ class Nested2DGrid(object):
     
 
     def nest(self, xlim,  ylim, nsub = 2):
+        # error check
         if (len(xlim) != 2) | (len(ylim) != 2):
             print('ERROR\tnest: Input xlim and/or ylim is not valid.')
             return 0
+        # decimals
+        xlim = [np.round(xlim[0], self.decimals), np.round(xlim[1], self.decimals)]
+        ylim = [np.round(ylim[0], self.decimals), np.round(ylim[1], self.decimals)]
 
         self.nsub = nsub
         self.xlim_sub, self.ylim_sub = xlim, ylim
@@ -105,7 +110,6 @@ class Nested2DGrid(object):
         # for original grid
         xi0 = int((self.nx - nxsub / self.nsub) / 2)
         yi0 = int((self.ny - nysub / self.nsub) / 2)
-
         return xi, yi, xi0, yi0
 
 
