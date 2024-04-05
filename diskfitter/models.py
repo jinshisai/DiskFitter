@@ -6,6 +6,7 @@ from scipy.optimize import root, minimize
 from scipy.signal import convolve
 from astropy import constants, units
 import emcee
+import dataclasses
 from dataclasses import dataclass
 
 from .grid import Nested2DGrid
@@ -24,6 +25,7 @@ hp     = constants.h.cgs.value # Planck constant [erg s]
 
 # unit
 auTOcm = units.au.to('cm') # 1 au (cm)
+
 
 @dataclass(slots=True)
 class ThreeLayerDisk:
@@ -108,6 +110,13 @@ class ThreeLayerDisk:
 
     def get_paramkeys(self):
         return list(self.__annotations__.keys())
+
+
+    def print_params(self):
+        fields = dataclasses.fields(self)
+        for v in fields:
+            print(f'{v.name}: ({v.type.__name__}) = {getattr(self, v.name)}')
+
 
 
     def build(self, xx_sky, yy_sky, rin = 0.1):
@@ -201,7 +210,6 @@ class ThreeLayerDisk:
         T_gf, T_gr, T_d, vlos_gf, vlos_gr, tau_gf, tau_gr, tau_d = self.build(xx, yy)
         vlos_gf += self.vsys
         vlos_gr += self.vsys
-        #print(self.tau_gc, self.rc_g, self.gamma_g, tau_gf[tau_gf <= 0.])
 
         # velocity grid
         ny, nx = xx.shape
@@ -212,8 +220,8 @@ class ThreeLayerDisk:
         ve = np.hstack([v - delv * 0.5, v[-1] + 0.5 * delv])
         I_cube = np.zeros((nv, ny, nx))
         
-        #print(T_gf)
         # making a cube
+        _Bv = lambda T, v: Bvppx(T, v, dx, dy, dist = dist, au = True)
         for i in range(nv):
             # front side
             _tau_gf = np.where(
@@ -227,9 +235,6 @@ class ThreeLayerDisk:
                 )
 
             # radiative transfer
-            _Bv = lambda T, v: Bvppx(T, v, dx, dy, dist = dist, au = True)
-            #_Bv = lambda T, v: Bv_Jybeam(T, v, beam[0], beam[1]) \
-            #if beam is not None else Bv(T, v)
             c_cmb = _Bv(Tcmb, f0) * (np.exp(- _tau_gf - tau_d - _tau_gr) - 1.)
             I_cube[i,:,:] = c_cmb + \
             _Bv(T_gr, f0) * (1. - np.exp(- _tau_gr)) * np.exp(- _tau_gf - tau_d) + \
@@ -251,7 +256,6 @@ class ThreeLayerDisk:
 
             I_cube /= np.abs(dx * dy) # per pixel to per au^2
             I_cube *= np.pi/(4.*np.log(2.)) * beam[0] * dist * beam[1] * dist # per au^2 --> per beam
-        #print('done.')
 
         # return intensity
         return I_cube
@@ -285,6 +289,291 @@ class ThreeLayerDisk:
             nstgrid.binning_onsubgrid(I_cube_sub[i,:,:])
 
         return I_cube
+
+
+
+@dataclass(slots=True)
+class SingleLayerDisk:
+
+    # params for the disk
+    # whichever gas or dust
+    T0: float = 400. # temperature
+    q: float = 0.5   # slope of temperature prof
+    log_tau_c: float = 0. # tau at rc
+    rc: float = 100.
+    gamma: float = 1.
+    # make it flared if you like
+    z0: float = 0.
+    hp: float = 1.25
+    # geometry
+    inc: float = 0.
+    pa: float = 0.
+    # stellar mass and vsys matter only for line case
+    ms: float = 1.
+    vsys: float = 0.
+    # positional offsets
+    dx0: float = 0.
+    dy0: float = 0.
+    # reference radius
+    r0: float = 1.
+
+
+    def set_params(self, 
+        T0 = 400., q = 0.5, log_tau_c = 0., rc = 100., gamma = 1., 
+        z0 = 0., hp = 1.25, inc = 0., pa = 0., ms = 1., vsys = 0., 
+        dx0=0., dy0=0., r0 = 1.):
+        '''
+
+        Parameters
+        ----------
+         T0
+         q
+         z0 (float): au
+         hp (float):
+         r0 (float): au
+         log_tau_c (float):
+         rc (float): au
+         gamma (float):
+         inc (float): deg
+         pa (float): deg
+         ms (float): Msun
+         vsys (float): km/s
+        '''
+        # initialize parameters
+        # dust layer
+        self.T0 = T0
+        self.q  = q
+        self.log_tau_c = log_tau_c
+        self.rc = rc
+        self.gamma = gamma
+        # height
+        self.z0 = z0
+        self.hp = hp
+        # geometry
+        self.inc = inc
+        self.pa = pa
+        # velocity
+        self.ms = ms
+        self.vsys = vsys
+        # positional offsets
+        self.dx0 = dx0
+        self.dy0 = dy0
+        # reference radius
+        self.r0 = r0
+
+
+    def get_paramkeys(self):
+        return list(self.__annotations__.keys())
+
+
+    def print_params(self):
+        fields = dataclasses.fields(self)
+        for v in fields:
+            print(f'{v.name}: ({v.type.__name__}) = {getattr(self, v.name)}')
+
+
+    def build(self, xx_sky, yy_sky, rin = 0.1):
+        '''
+        Build a model given sky coordinates and return a info for making a image cube.
+        '''
+        # parameters
+        _inc_rad = np.radians(self.inc)
+        _pa_rad = np.radians(self.pa)
+        _fz = lambda r, z0, r0, hp: z0*(r/r0)**hp
+        _dfz = lambda x, y, z0, r0, hp: 2. * y * 0.5 / np.sqrt(x*x + y*y) \
+        / r0 * z0 * hp * (np.sqrt(x*x + y*y)/r0)*(hp - 1.)
+
+        # calculate temperature (T), velocity (v) and tau (t)
+        def get_Tvt(xx_sky, yy_sky, 
+            _fz, zargs, inc, pa, ms, T0, q, r0, tau_c, rc, gamma, _dfz=None):
+            # deprojection
+            #print('Start deprojection', self.z0, self.hp, self.inc)
+            depr = sky_to_local(xx_sky, yy_sky, 
+                inc, pa + 0.5 * np.pi, _fz, 
+                zargs, _dfz, zarg_lims = [[-0.3, 0.3], [0.1, 100.1], [0., 2.]]) # inc_max = 85.
+            #print('Done deprojection')
+            if type(depr) == int:
+                T = np.full(xx_sky.shape, 1.) # 1 instead of zero to prevent numerical errors
+                vlos  = np.zeros(xx_sky.shape)
+                tau = np.zeros(xx_sky.shape)
+                return T, vlos, tau
+            else:
+                xx, yy = depr
+
+            # local coordinates
+            rr = np.sqrt(xx * xx + yy * yy) # radius
+            phph = np.arctan2(yy, xx) # azimuthal angle (rad)
+            zz = _fz(rr, *zargs) # height
+            # prevent r=0
+            rr[rr == 0.] = np.nan
+
+            # quantities
+            # temperature
+            T = T0 * (rr / r0)**(-q)
+            T[np.isnan(T)] = 1. # to prevent computational errors
+            T[T <= 1.] = 1. # safty net
+
+            # line of sight velocity
+            # take y-axis as the line of sight
+            vlos = vkep(rr * auTOcm, ms * Msun, zz * auTOcm) \
+            * np.cos(phph) * np.sin(_inc_rad) * 1.e-5 # cm/s --> km/s
+
+            # tau
+            tau = ssdisk(rr, tau_c, rc, gamma, beta = None)
+            tau[np.isnan(tau)] = 0.  # to prevent computational errors
+            tau[tau < 0.] = 0. # safty net
+
+            T[rr < rin] = 0.
+            vlos[rr < rin] = 0.
+            tau[rr < rin] = 0.
+
+            return T, vlos, tau
+
+
+        # for a layer
+        T, vlos, tau = get_Tvt(
+            xx_sky - self.dx0, yy_sky - self.dy0, 
+            _fz, [self.z0, self.r0, self.hp],
+            _inc_rad, _pa_rad, self.ms,
+            self.T0, self.q, self.r0,
+            10.**self.log_tau_c, self.rc, self.gamma,)
+
+        return T, vlos, tau
+
+
+    def build_cube(self, xx, yy, v, 
+        beam = None, dist = 140., Tcmb = 2.73, f0 = 230.):
+        # get quantities
+        T, vlos, tau = self.build(xx, yy)
+        vlos += self.vsys
+
+        # velocity grid
+        ny, nx = xx.shape
+        dx = xx[0,1] - xx[0,0]
+        dy = yy[1,0] - yy[0,0]
+        nv = len(v)
+        delv = np.mean(v[1:] - v[:-1])
+        ve = np.hstack([v - delv * 0.5, v[-1] + 0.5 * delv])
+        I_cube = np.zeros((nv, ny, nx))
+
+        # making a cube
+        _Bv = lambda T, v: Bvppx(T, v, dx, dy, dist = dist, au = True)
+        for i in range(nv):
+            # tau_v
+            _tau = np.where(
+                (ve[i] <= vlos) & (vlos < ve[i+1]),
+                tau, 0.
+                )
+
+            # radiative transfer
+            I_cube[i,:,:] = (_Bv(T, f0) - _Bv(Tcmb, f0)) * (1. - np.exp(- _tau))
+
+        #Idust = (_Bv(T_d, f0) - _Bv(Tcmb, f0)) * (1. - np.exp(- tau_d))
+        #I_cube = I_cube - np.tile(Idust, (nv,1,1))
+
+        # Convolve beam if given
+        if beam is not None:
+            gaussbeam = gaussian2d(xx, yy, 1., 0., 0., 
+                beam[1] / 2.35 * dist, beam[0] / 2.35 * dist, beam[2], peak=True)
+            gaussbeam /= np.sum(gaussbeam)
+
+            I_cube = np.where(np.isnan(I_cube), 0., I_cube)
+            I_cube = convolve(I_cube, np.array([gaussbeam]), mode='same')
+
+            I_cube /= np.abs(dx * dy) # per pixel to per au^2
+            I_cube *= np.pi/(4.*np.log(2.)) * beam[0] * dist * beam[1] * dist # per au^2 --> per beam
+
+        # return intensity
+        return I_cube
+
+
+    def build_nested_cube(self, xx, yy, v, xscale, yscale, n_subgrid,
+        beam = None, dist = 140., Tcmb = 2.73, f0 = 230.,):
+        # original grid
+        ny, nx = xx.shape
+
+        # nested grid
+        nstgrid = Nested2DGrid(xx, yy)
+        xlim = [- np.nanmax(xx) * xscale, np.nanmax(xx) * yscale]
+        ylim = [- np.nanmax(yy) * xscale, np.nanmax(yy) * yscale]
+        xx_sub, yy_sub = nstgrid.nest(xlim, ylim, n_subgrid)
+
+        # cube on the original grid
+        I_cube = self.build_cube(xx, yy, v, 
+        beam = beam, dist = dist, Tcmb = Tcmb, f0 = f0,)
+
+        # cube on the nested grid
+        I_cube_sub = self.build_cube(xx_sub, yy_sub, v, 
+        beam = beam, dist = dist, Tcmb = Tcmb, f0 = f0,)
+
+        # cut off edge
+        xi, yi, xi0, yi0 = nstgrid.edgecut_indices(beam[0] * dist * 1.5, beam[0] * dist * 1.5)
+        I_cube_sub = I_cube_sub[:, yi:-yi, xi:-xi]
+        # replace
+        for i in range(len(v)):
+            I_cube[i, yi0:-yi0, xi0:-xi0] = \
+            nstgrid.binning_onsubgrid(I_cube_sub[i,:,:])
+
+        return I_cube
+
+
+    def build_cont(self, xx, yy, 
+        beam = None, dist = 140., Tcmb = 2.73, f0 = 230.):
+        # get quantities
+        T, _, tau = self.build(xx, yy)
+
+        # velocity grid
+        ny, nx = xx.shape
+        dx = xx[0,1] - xx[0,0]
+        dy = yy[1,0] - yy[0,0]
+
+        # radiative transfer
+        _Bv = lambda T, v: Bvppx(T, v, dx, dy, dist = dist, au = True)
+        Iv = (_Bv(T, f0) - _Bv(Tcmb, f0)) * (1. - np.exp(- tau))
+
+        # Convolve beam if given
+        if beam is not None:
+            gaussbeam = gaussian2d(xx, yy, 1., 0., 0., 
+                beam[1] / 2.35 * dist, beam[0] / 2.35 * dist, beam[2], peak=True)
+            gaussbeam /= np.sum(gaussbeam)
+
+            Iv = np.where(np.isnan(Iv), 0., Iv)
+            Iv = convolve(Iv, gaussbeam, mode='same')
+
+            Iv /= np.abs(dx * dy) # per pixel to per au^2
+            Iv *= np.pi/(4.*np.log(2.)) * beam[0] * dist * beam[1] * dist # per au^2 --> per beam
+
+        # return intensity
+        return Iv
+
+
+    def build_nested_cont(self, xx, yy, xscale, yscale, n_subgrid,
+        beam = None, dist = 140., Tcmb = 2.73, f0 = 230.,):
+        # original grid
+        ny, nx = xx.shape
+
+        # nested grid
+        nstgrid = Nested2DGrid(xx, yy)
+        xlim = [- np.nanmax(xx) * xscale, np.nanmax(xx) * yscale]
+        ylim = [- np.nanmax(yy) * xscale, np.nanmax(yy) * yscale]
+        xx_sub, yy_sub = nstgrid.nest(xlim, ylim, n_subgrid)
+
+        # cube on the original grid
+        Iv = self.build_cont(xx, yy,
+        beam = beam, dist = dist, Tcmb = Tcmb, f0 = f0,)
+
+        # cube on the nested grid
+        Iv_sub = self.build_cont(xx_sub, yy_sub,
+        beam = beam, dist = dist, Tcmb = Tcmb, f0 = f0,)
+
+        # cut off edge
+        xi, yi, xi0, yi0 = \
+        nstgrid.edgecut_indices(beam[0] * dist * 1.3, beam[0] * dist * 1.3)
+        Iv_sub = Iv_sub[yi:-yi, xi:-xi]
+        # replace
+        Iv[yi0:-yi0, xi0:-xi0] = nstgrid.binning_onsubgrid(Iv_sub)
+
+        return Iv
 
 
 

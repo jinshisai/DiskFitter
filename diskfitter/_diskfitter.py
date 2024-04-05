@@ -73,7 +73,7 @@ class Fitter(object):
 
 
     # define fitting function
-    def run_fit(self, params, pranges, d, derr, xx, yy, v,
+    def fit_cube(self, params, pranges, d, derr, xx, yy, v,
         outname = 'modelfitter_results', nwalkers=None, 
         nrun=2000, nburn=1000, labels=[], show_progress=True, 
         optimize_ini=False, moves=emcee.moves.WalkMove(), symmetric_error=False,
@@ -202,6 +202,131 @@ class Fitter(object):
         modelcube = fitfuc(xx, yy, v, *self.popt)
         self.modelcube = modelcube
         return modelcube
+
+
+
+    # define fitting function
+    def fit_cont(self, params, pranges, d, derr, xx, yy,
+        outname = 'modelfitter_results', nwalkers=None, 
+        nrun=2000, nburn=1000, labels=[], show_progress=True, 
+        optimize_ini=False, moves=emcee.moves.WalkMove(), symmetric_error=False,
+        npool = 1,):
+        # drop unecessary axis
+        d = np.squeeze(d)
+        # sampling step
+        if self.sampling:
+            delx = - (xx[0,1] - xx[0,0]) / self.dist # arcsec
+            dely = (yy[1,0] - yy[0,0]) / self.dist # arcsec
+            smpl_x = int(self.beam[1] * 0.5 / delx)
+            smpl_y = int(self.beam[1] * 0.5 / dely)
+            d_smpld = d[::smpl_y, ::smpl_x]
+        else:
+            smpl_x, smpl_y = 1, 1
+            d_smpld = d.copy()
+        # labels
+        if len(labels) != len(params): labels = self.pfree_keys
+
+        # nested grid
+        if self.n_subgrid > 1:
+            nstgrid = Nested2DGrid(xx, yy)
+            xlim = [-np.nanmax(xx) * self.xscale, np.nanmax(xx) * self.xscale]
+            ylim = [-np.nanmax(yy) * self.yscale, np.nanmax(yy) * self.yscale]
+            xx_sub, yy_sub = nstgrid.nest(xlim, ylim, self.n_subgrid)
+            if self.beam is not None:
+                xi, yi, xi0, yi0 = nstgrid.edgecut_indices(
+                    self.beam[0] * self.dist * 1.3, self.beam[0] * self.dist * 1.3)
+                # fitting function
+                def fitfuc(xx, yy, *params):
+                    # safty net
+                    if np.all((pranges[0] < np.array([*params])) \
+                        * (np.array([*params]) < pranges[1])) == False:
+                        return np.zeros(xx.shape)[::smpl_y, ::smpl_x]
+                    # merge free parameters to fixed parameters
+                    params_free = dict(zip(self.pfree_keys, [*params]))
+                    _params_full = merge_dictionaries(params_free, self.params_fixed)
+                    params_full = list(
+                        {k: _params_full[k] for k in self.model_keys}.values()
+                        ) # reordered elements
+
+                    # build model cube
+                    model = self.model(*params_full)
+                    # cube on the original grid
+                    modelim = model.build_cont(xx, yy, *self.build_args)
+                    # cube on the nested grid
+                    modelim_sub = model.build_cont(xx_sub, yy_sub, 
+                        *self.build_args)[yi:-yi, xi:-xi]
+                    # replace
+                    modelim[yi0:-yi0, xi0:-xi0] = \
+                    nstgrid.binning_onsubgrid(modelim_sub)
+                    return modelim[::smpl_y, ::smpl_x]
+            else:
+                # fitting function
+                def fitfuc(xx, yy, *params):
+                    where_sub = nstgrid.where_subgrid()
+                    # safty net
+                    if np.all((pranges[0] < np.array([*params])) \
+                        * (np.array([*params]) < pranges[1])) == False:
+                        return np.zeros(xx.shape)[::smpl_y, ::smpl_x]
+                    # merge free parameters to fixed parameters
+                    params_free = dict(zip(self.pfree_keys, [*params]))
+                    _params_full = merge_dictionaries(params_free, self.params_fixed)
+                    params_full = list(
+                        {k: _params_full[k] for k in self.model_keys}.values()
+                        ) # reordered elements
+                    #del params_free, _params_full # release memory
+
+                    # build model cube
+                    model = self.model(*params_full)
+                    # cube on the original grid
+                    modelim = model.build_cont(xx, yy, *self.build_args)
+                    # cube on the nested grid
+                    modelim_sub = model.build_cont(xx_sub, yy_sub, 
+                        *self.build_args)
+                    # replace
+                    modelim[where_sub] = \
+                    nstgrid.binning_onsubgrid(modelim_sub).ravel()
+                    return modelcube[::smpl_y, ::smpl_x]
+        else:
+            def fitfuc(xx, yy, *params):
+                # safty net
+                if np.all((pranges[0] < np.array([*params])) \
+                    * (np.array([*params]) < pranges[1])) == False:
+                    return np.zeros(xx.shape)[::smpl_y, ::smpl_x]
+                # merge free parameters to fixed parameters
+                params_free = dict(zip(self.pfree_keys, [*params]))
+                _params_full = merge_dictionaries(params_free, self.params_fixed)
+                params_full = list(
+                    {k: _params_full[k] for k in self.model_keys}.values()
+                    ) # reordered elements
+                #del params_free, _params_full # release memory
+
+                # build model cube
+                model = self.model(*params_full)
+                modelim = model.build_cont(xx, yy, *self.build_args)
+                return modelim[::smpl_y, ::smpl_x]
+
+
+        # fitting
+        p0 = list(self.params_free.values())
+        BE = BayesEstimator([xx, yy], d_smpld, derr, fitfuc)
+        BE.run_mcmc(p0, pranges, outname=outname,
+            nwalkers = nwalkers, nrun = nrun, nburn = nburn, labels = labels,
+            show_progress = show_progress, optimize_ini = optimize_ini, moves = moves,
+            symmetric_error = symmetric_error, npool = npool, f_rand_init=0.1)
+        self.popt = BE.pfit[0]
+        self.perr = BE.pfit[1:]
+
+
+        # best solution
+        params_free = dict(zip(self.pfree_keys, [*self.popt]))
+        _params_full = merge_dictionaries(params_free, self.params_fixed)
+        params_full = list(
+            {k: _params_full[k] for k in self.model_keys}.values()
+            )
+        smpl_y, smpl_x = 1, 1
+        modelim = fitfuc(xx, yy, *self.popt)
+        self.modelim = modelim
+        return modelim
 
 
 def merge_dictionaries(dict1, dict2):
