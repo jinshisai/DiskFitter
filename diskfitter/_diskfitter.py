@@ -83,10 +83,10 @@ class Fitter(object):
         # sampling step
         if self.sampling:
             delx = - (xx[0,1] - xx[0,0]) / self.dist # arcsec
-            dely = (yy[1,0] - yy[0,0]) / self.dist # arcsec
+            dely = (yy[1,0] - yy[0,0]) / self.dist   # arcsec
             smpl_x = int(self.beam[1] * 0.5 / delx)
             smpl_y = int(self.beam[1] * 0.5 / dely)
-            d_smpld = d[:, ::smpl_y, ::smpl_x]
+            d_smpld = d[:, smpl_y//2::smpl_y, smpl_x//2::smpl_x]
         else:
             smpl_x, smpl_y = 1, 1
             d_smpld = d.copy()
@@ -109,7 +109,7 @@ class Fitter(object):
                         * (np.array([*params]) < pranges[1])) == False:
                         return np.zeros(
                             (len(v), xx.shape[0], xx.shape[1])
-                            )[:, ::smpl_y, ::smpl_x]
+                            )[:, smpl_y//2::smpl_y, smpl_x//2::smpl_x]
                     # merge free parameters to fixed parameters
                     params_free = dict(zip(self.pfree_keys, [*params]))
                     _params_full = merge_dictionaries(params_free, self.params_fixed)
@@ -128,7 +128,7 @@ class Fitter(object):
                     for i in range(len(v)):
                         modelcube[i, yi0:-yi0, xi0:-xi0] = \
                         nstgrid.binning_onsubgrid(modelcube_sub[i,:,:])
-                    return modelcube[:, ::smpl_y, ::smpl_x]
+                    return modelcube[:, smpl_y//2::smpl_y, smpl_x//2::smpl_x]
             else:
                 # fitting function
                 def fitfuc(xx, yy, v, *params):
@@ -138,7 +138,7 @@ class Fitter(object):
                         * (np.array([*params]) < pranges[1])) == False:
                         return np.zeros(
                             (len(v), xx.shape[0], xx.shape[1])
-                            )[:, ::smpl_y, ::smpl_x]
+                            )[:, smpl_y//2::smpl_y, smpl_x//2::smpl_x]
                     # merge free parameters to fixed parameters
                     params_free = dict(zip(self.pfree_keys, [*params]))
                     _params_full = merge_dictionaries(params_free, self.params_fixed)
@@ -158,7 +158,7 @@ class Fitter(object):
                     for i in range(len(v)):
                         modelcube[i,where_sub[0], where_sub[1]] = \
                         nstgrid.binning_onsubgrid(modelcube_sub[i,:,:]).ravel()
-                    return modelcube[:, ::smpl_y, ::smpl_x]
+                    return modelcube[:, smpl_y//2::smpl_y, smpl_x//2::smpl_x]
         else:
             def fitfuc(xx, yy, v, *params):
                 # safty net
@@ -166,7 +166,7 @@ class Fitter(object):
                     * (np.array([*params]) < pranges[1])) == False:
                     return np.zeros(
                         (len(v), xx.shape[0], xx.shape[1])
-                        )[:, ::smpl_y, ::smpl_x]
+                        )[:, smpl_y//2::smpl_y, smpl_x//2::smpl_x]
                 # merge free parameters to fixed parameters
                 params_free = dict(zip(self.pfree_keys, [*params]))
                 _params_full = merge_dictionaries(params_free, self.params_fixed)
@@ -178,7 +178,7 @@ class Fitter(object):
                 # build model cube
                 model = self.model(*params_full)
                 modelcube = model.build_cube(xx, yy, v, *self.build_args)
-                return modelcube[:, ::smpl_y, ::smpl_x]
+                return modelcube[:, smpl_y//2::smpl_y, smpl_x//2::smpl_x]
 
 
         # fitting

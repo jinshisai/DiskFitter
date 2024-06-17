@@ -9,7 +9,8 @@ import emcee
 import dataclasses
 from dataclasses import dataclass
 
-from .grid import Nested2DGrid
+from .funcs import beam_convolution, gaussian2d, glnprof_conv
+from .grid import Nested2DGrid, Nested1DGrid, SubGrid2D
 
 
 ### constants
@@ -54,11 +55,14 @@ class ThreeLayerDisk:
     dy0: float = 0.
     # reference radius
     r0: float = 1.
+    # line width
+    delv: float = 0.
 
     def set_params(self, 
         Td0 = 400., qd = 0.5, log_tau_dc = 0., rc_d = 100., gamma_d = 1., 
         Tg0 = 400., qg = 0.5, log_tau_gc = 0., rc_g = 100., gamma_g = 1., 
-        z0 = 0., hp = 1.25, inc = 0., pa = 0., ms = 1., vsys = 0, dx0=0., dy0=0., r0 = 1.):
+        z0 = 0., hp = 1.25, inc = 0., pa = 0., ms = 1., vsys = 0, 
+        dx0=0., dy0=0., r0 = 1., delv = 0.):
         '''
 
         Parameters
@@ -106,6 +110,8 @@ class ThreeLayerDisk:
         self.dy0 = dy0
         # reference radius
         self.r0 = r0
+        # line width
+        self.delv = delv
 
 
     def get_paramkeys(self):
@@ -116,7 +122,6 @@ class ThreeLayerDisk:
         fields = dataclasses.fields(self)
         for v in fields:
             print(f'{v.name}: ({v.type.__name__}) = {getattr(self, v.name)}')
-
 
 
     def build(self, xx_sky, yy_sky, rin = 0.1):
@@ -205,7 +210,7 @@ class ThreeLayerDisk:
 
 
     def build_cube(self, xx, yy, v, 
-        beam = None, dist = 140., Tcmb = 2.73, f0 = 230.):
+        beam = None, dist = 140., Tcmb = 2.73, f0 = 230.,):
         # get quantities
         T_gf, T_gr, T_d, vlos_gf, vlos_gr, tau_gf, tau_gr, tau_d = self.build(xx, yy)
         vlos_gf += self.vsys
@@ -216,48 +221,80 @@ class ThreeLayerDisk:
         dx = xx[0,1] - xx[0,0]
         dy = yy[1,0] - yy[0,0]
         nv = len(v)
-        delv = np.mean(v[1:] - v[:-1])
-        ve = np.hstack([v - delv * 0.5, v[-1] + 0.5 * delv])
-        I_cube = np.zeros((nv, ny, nx))
-        
+        dv = np.mean(v[1:] - v[:-1])
+        ve = np.hstack([v - dv * 0.5, v[-1] + 0.5 * dv])
+
+        # nested velocity grid
+        #nstg = Nested1DGrid(v)
+        #nstg.nest(5)
+        #v_nst = nstg.x_sub
+        #ve_nst = nstg.xe_sub
+        #nv_nst = nstg.nx_sub
+
         # making a cube
+        _tau_gf = np.zeros((nv, ny, nx))
+        _tau_gr = np.zeros((nv, ny, nx))
         _Bv = lambda T, v: Bvppx(T, v, dx, dy, dist = dist, au = True)
+        #_Bv = lambda T, v: Bv(T, v)
+        # calculate tau_v
         for i in range(nv):
+            #print('vrange: %.2f-%.2f'%(ve[i],ve[i+1]))
             # front side
-            _tau_gf = np.where(
+            _tau_gf[i,:,:] = np.where(
                 (ve[i] <= vlos_gf) & (vlos_gf < ve[i+1]),
                 tau_gf, 0.
                 )
             # rear side
-            _tau_gr = np.where(
+            _tau_gr[i,:,:] = np.where(
                 (ve[i] <= vlos_gr) & (vlos_gr < ve[i+1]),
                 tau_gr, 0.
                 )
+        # line width
+        if self.delv > 0.:
+            _tau_gf = glnprof_conv(_tau_gf, v, self.delv)
+            _tau_gr = glnprof_conv(_tau_gr, v, self.delv)
+        # get it back to original grid
+        #_tau_gf = nstg.binning_onsubgrid(_tau_gf)
+        #_tau_gr = nstg.binning_onsubgrid(_tau_gr)
 
-            # radiative transfer
-            c_cmb = _Bv(Tcmb, f0) * (np.exp(- _tau_gf - tau_d - _tau_gr) - 1.)
-            I_cube[i,:,:] = c_cmb + \
-            _Bv(T_gr, f0) * (1. - np.exp(- _tau_gr)) * np.exp(- _tau_gf - tau_d) + \
-            _Bv(T_d, f0) * (1. - np.exp(- tau_d)) * np.exp(- _tau_gf) + \
-            _Bv(T_gf, f0) * (1. - np.exp(- _tau_gf))
+        # radiative transfer
+        _Bv_cmb = np.tile(_Bv(Tcmb, f0), (nv,1,1))
+        _tau_d  = np.tile(tau_d, (nv,1,1))
+        _Bv_gf  = np.tile(_Bv(T_gf, f0), (nv,1,1))
+        _Bv_gr  = np.tile(_Bv(T_gr, f0), (nv,1,1))
+        _Bv_d   = np.tile(_Bv(T_d, f0), (nv,1,1))
+        c_cmb = _Bv_cmb * (np.exp(- _tau_gf - _tau_d - _tau_gr) - 1.)
+        I_cube = c_cmb + \
+        _Bv_gr * (1. - np.exp(- _tau_gr)) * np.exp(- _tau_gf - _tau_d) + \
+        _Bv_d * (1. - np.exp(- _tau_d)) * np.exp(- _tau_gf) + \
+        _Bv_gf * (1. - np.exp(- _tau_gf))
 
-        Idust = (_Bv(T_d, f0) - _Bv(Tcmb, f0)) * (1. - np.exp(- tau_d))
-        I_cube = I_cube - np.tile(Idust, (nv,1,1))
+        # continuum subtraction
+        Idust = (_Bv_d - _Bv_cmb) * (1. - np.exp(- _tau_d))
+        I_cube = I_cube - Idust
+        I_cube /= np.abs(dx * dy) # to conserve flux
 
-        #print('convolve beam..')
         # Convolve beam if given
         if beam is not None:
-            gaussbeam = gaussian2d(xx, yy, 1., 0., 0., 
-                beam[1] / 2.35 * dist, beam[0] / 2.35 * dist, beam[2], peak=True)
-            gaussbeam /= np.sum(gaussbeam)
+            I_cube = beam_convolution(xx, yy, I_cube, [beam[0] * dist, beam[1] * dist, beam[2]])
 
-            I_cube = np.where(np.isnan(I_cube), 0., I_cube)
-            I_cube = convolve(I_cube, np.array([gaussbeam]), mode='same')
+        return I_cube
 
-            I_cube /= np.abs(dx * dy) # per pixel to per au^2
-            I_cube *= np.pi/(4.*np.log(2.)) * beam[0] * dist * beam[1] * dist # per au^2 --> per beam
 
-        # return intensity
+    def build_cube_subgrid(self, xx, yy, v, 
+        beam = None, dist = 140., Tcmb = 2.73, f0 = 230.,
+        nsub = 2):
+        if nsub < 1:
+            print('ERROR\tbuild_cube_subgrid: nsub must be >= 2.')
+            return 0
+        subgrid = SubGrid2D(xx, yy, nsub = nsub)
+        _xx, _yy = subgrid.xx_sub, subgrid.yy_sub
+        I_cube_sub = self.build_cube(_xx, _yy, v, beam, dist, Tcmb, f0)
+        nv = len(v)
+        ny, nx = xx.shape
+        I_cube = np.empty((nv, ny, nx))
+        for i in range(nv):
+            I_cube[i,:,:] = subgrid.binning_onsubgrid(I_cube_sub[i,:,:])
         return I_cube
 
 
@@ -281,7 +318,8 @@ class ThreeLayerDisk:
         beam = beam, dist = dist, Tcmb = Tcmb, f0 = f0,)
 
         # cut off edge
-        xi, yi, xi0, yi0 = nstgrid.edgecut_indices(beam[0] * dist * 1.5, beam[0] * dist * 1.5)
+        xi, yi, xi0, yi0 = nstgrid.edgecut_indices(
+            beam[0] * dist * 1.3, beam[0] * dist * 1.3) # * 1.5
         I_cube_sub = I_cube_sub[:, yi:-yi, xi:-xi]
         # replace
         for i in range(len(v)):
@@ -316,12 +354,14 @@ class SingleLayerDisk:
     dy0: float = 0.
     # reference radius
     r0: float = 1.
+    # line width
+    delv: float = 0.
 
 
     def set_params(self, 
         T0 = 400., q = 0.5, log_tau_c = 0., rc = 100., gamma = 1., 
         z0 = 0., hp = 1.25, inc = 0., pa = 0., ms = 1., vsys = 0., 
-        dx0=0., dy0=0., r0 = 1.):
+        dx0=0., dy0=0., r0 = 1., delv = 0.):
         '''
 
         Parameters
@@ -360,6 +400,8 @@ class SingleLayerDisk:
         self.dy0 = dy0
         # reference radius
         self.r0 = r0
+        # line width
+        self.delv = delv
 
 
     def get_paramkeys(self):
@@ -442,7 +484,8 @@ class SingleLayerDisk:
 
 
     def build_cube(self, xx, yy, v, 
-        beam = None, dist = 140., Tcmb = 2.73, f0 = 230.):
+        beam = None, dist = 140., Tcmb = 2.73, f0 = 230.,
+        return_tau = False):
         # get quantities
         T, vlos, tau = self.build(xx, yy)
         vlos += self.vsys
@@ -452,43 +495,43 @@ class SingleLayerDisk:
         dx = xx[0,1] - xx[0,0]
         dy = yy[1,0] - yy[0,0]
         nv = len(v)
-        delv = np.mean(v[1:] - v[:-1])
-        ve = np.hstack([v - delv * 0.5, v[-1] + 0.5 * delv])
-        I_cube = np.zeros((nv, ny, nx))
+        dv = np.mean(v[1:] - v[:-1])
+        ve = np.hstack([v - dv * 0.5, v[-1] + 0.5 * dv])
 
         # making a cube
+        _tau = np.zeros((nv, ny, nx))
         _Bv = lambda T, v: Bvppx(T, v, dx, dy, dist = dist, au = True)
+        # calculate tau_v
         for i in range(nv):
-            # tau_v
-            _tau = np.where(
+            #print('vrange: %.2f-%.2f'%(ve[i],ve[i+1]))
+            _tau[i,:,:] = np.where(
                 (ve[i] <= vlos) & (vlos < ve[i+1]),
                 tau, 0.
                 )
+        # line width
+        if self.delv > 0.:
+            _tau = glnprof_conv(_tau, v, self.delv)
 
-            # radiative transfer
-            I_cube[i,:,:] = (_Bv(T, f0) - _Bv(Tcmb, f0)) * (1. - np.exp(- _tau))
+        if return_tau:
+            return _tau #np.exp(- _tau) #(1. - np.exp(- _tau))
 
-        #Idust = (_Bv(T_d, f0) - _Bv(Tcmb, f0)) * (1. - np.exp(- tau_d))
-        #I_cube = I_cube - np.tile(Idust, (nv,1,1))
+        #_tau[_tau > 0.] = 1000.
+        # radiative transfer
+        _Bv_bg = np.tile(_Bv(Tcmb, f0), (nv,1,1))
+        _Bv_T  = np.tile(_Bv(T, f0), (nv,1,1))
+        I_cube = (_Bv_T - _Bv_bg) * (1. - np.exp(- _tau))
 
         # Convolve beam if given
         if beam is not None:
-            gaussbeam = gaussian2d(xx, yy, 1., 0., 0., 
-                beam[1] / 2.35 * dist, beam[0] / 2.35 * dist, beam[2], peak=True)
-            gaussbeam /= np.sum(gaussbeam)
-
-            I_cube = np.where(np.isnan(I_cube), 0., I_cube)
-            I_cube = convolve(I_cube, np.array([gaussbeam]), mode='same')
-
-            I_cube /= np.abs(dx * dy) # per pixel to per au^2
-            I_cube *= np.pi/(4.*np.log(2.)) * beam[0] * dist * beam[1] * dist # per au^2 --> per beam
+            I_cube = beam_convolution(xx, yy, I_cube, 
+                [beam[0] * dist, beam[1] * dist, beam[2]])
 
         # return intensity
         return I_cube
 
 
     def build_nested_cube(self, xx, yy, v, xscale, yscale, n_subgrid,
-        beam = None, dist = 140., Tcmb = 2.73, f0 = 230.,):
+        beam = None, dist = 140., Tcmb = 2.73, f0 = 230., return_tau = False):
         # original grid
         ny, nx = xx.shape
 
@@ -500,17 +543,23 @@ class SingleLayerDisk:
 
         # cube on the original grid
         I_cube = self.build_cube(xx, yy, v, 
-        beam = beam, dist = dist, Tcmb = Tcmb, f0 = f0,)
+        beam = beam, dist = dist, Tcmb = Tcmb, f0 = f0, return_tau = return_tau)
 
         # cube on the nested grid
         I_cube_sub = self.build_cube(xx_sub, yy_sub, v, 
-        beam = beam, dist = dist, Tcmb = Tcmb, f0 = f0,)
+        beam = beam, dist = dist, Tcmb = Tcmb, f0 = f0, return_tau = return_tau)
 
         # cut off edge
-        xi, yi, xi0, yi0 = nstgrid.edgecut_indices(beam[0] * dist * 1.5, beam[0] * dist * 1.5)
-        I_cube_sub = I_cube_sub[:, yi:-yi, xi:-xi]
+        if (beam is not None) & (return_tau == False):
+            xi, yi, xi0, yi0 = nstgrid.edgecut_indices(beam[0] * dist * 1.5, beam[0] * dist * 1.5)
+            I_cube_sub = I_cube_sub[:, yi:-yi, xi:-xi]
+            xi1, yi1 = nstgrid.nx - xi0, nstgrid.ny - yi0
+        else:
+            xi0, yi0 = nstgrid.xi0, nstgrid.yi0
+            xi1, yi1 = nstgrid.xi1, nstgrid.yi1
         # replace
         for i in range(len(v)):
+            #I_cube[i, yi0:yi1, xi0:xi1] = \
             I_cube[i, yi0:-yi0, xi0:-xi0] = \
             nstgrid.binning_onsubgrid(I_cube_sub[i,:,:])
 
@@ -533,15 +582,8 @@ class SingleLayerDisk:
 
         # Convolve beam if given
         if beam is not None:
-            gaussbeam = gaussian2d(xx, yy, 1., 0., 0., 
-                beam[1] / 2.35 * dist, beam[0] / 2.35 * dist, beam[2], peak=True)
-            gaussbeam /= np.sum(gaussbeam)
-
-            Iv = np.where(np.isnan(Iv), 0., Iv)
-            Iv = convolve(Iv, gaussbeam, mode='same')
-
-            Iv /= np.abs(dx * dy) # per pixel to per au^2
-            Iv *= np.pi/(4.*np.log(2.)) * beam[0] * dist * beam[1] * dist # per au^2 --> per beam
+            Iv = beam_convolution(xx, yy, Iv, 
+                [beam[0] * dist, beam[1] * dist, beam[2]])
 
         # return intensity
         return Iv
@@ -715,7 +757,7 @@ def gaussian_profile(r, I0, sigr):
 # Gaussians
 # 1D
 def gaussian1d(x, amp, mx, sig):
-    return amp*np.exp(-(x - mx)**2/(2*sig**2)) #+ offset
+    return amp*np.exp(- 0.5 * (x - mx)**2/(sig**2)) #+ offset
 
 # 2D
 def gaussian2d(x, y, A, mx, my, sigx, sigy, pa=0, peak=True):
@@ -827,9 +869,8 @@ def sky_to_local(x, y, inc, pa, fz, zargs, dfz = None,
         ydep = sol.x
     elif hp == 1.:
         _r = 1.
-        _z = fz(_r, *zargs)
-        _y = _r * np.sign(_z) * -1.
-        th_lim = 0.5 * np.pi - np.arctan2(_z, _y) - inc
+        _z = np.abs(fz(_r, *zargs))
+        th_lim = 0.5 * np.pi - np.arctan2(_z, _r) - inc
         if th_lim <= 0.:
             return 0
         else:
@@ -837,9 +878,19 @@ def sky_to_local(x, y, inc, pa, fz, zargs, dfz = None,
                 args=(x, y, inc, fz, zargs, dfz), method = method,)
             ydep = sol.x
     else:
+        sol = root(y_solver, y, 
+                args=(x, y, inc, fz, zargs, dfz), 
+                method = method, options={'maxiter': 20})
+        if sol.success:
+            ydep = sol.x
+        else:
+            return 0
+
+        '''
         y_ypmin = (1. / np.tan(inc) * r0**hp / np.abs(z0) / hp)**( 1. / (hp - 1.))
         yp_lim = y_ypmin * np.cos(inc) + fz(np.sqrt(y_ypmin * y_ypmin), *zargs) \
         * np.sin(inc)
+        print(yp_lim)
 
         # deprojection
         ydep = np.empty(y.shape)
@@ -855,9 +906,10 @@ def sky_to_local(x, y, inc, pa, fz, zargs, dfz = None,
                 return 0
             #print('passed')
             #print(sol.nit, sol.success)
-            ydep[np.where(cond)] = sol.x
+            #ydep[np.where(cond)] = sol.x
         if np.count_nonzero(~cond) > 0:
             ydep[np.where(~cond)] = np.nan
+        '''
 
     return x, ydep
 
@@ -958,3 +1010,15 @@ def Bv_Jybeam(T,v,bmaj,bmin):
     Bv = Bv*1.0e26     # MKS --> Jy (Jy = 10^-26 Wm-2Hz-1)
     Bv = Bv*bTOstr     # Jy/str --> Jy/beam
     return Bv
+
+def doppler_f2v(f, f0, definition = 'radio'):
+    return (f0 - f) / f0 * clight
+
+def doppler_df2dv(df, f0, definition = 'radio'):
+    return - df * clight / f0
+
+def doppler_v2f(v, f0, definition = 'radio'):
+    return f0 - v * f0 / clight
+
+def doppler_dv2df(dv, f0, definition = 'radio'):
+    return - dv * f0 / clight
