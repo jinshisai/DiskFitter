@@ -281,9 +281,8 @@ class ThreeLayerDisk:
         return I_cube
 
 
-    def build_cube_subgrid(self, xx, yy, v, 
-        beam = None, dist = 140., Tcmb = 2.73, f0 = 230.,
-        nsub = 2):
+    def build_cube_subgrid(self, xx, yy, v, nsub = 2,
+        beam = None, dist = 140., Tcmb = 2.73, f0 = 230.,):
         if nsub < 1:
             print('ERROR\tbuild_cube_subgrid: nsub must be >= 2.')
             return 0
@@ -292,10 +291,7 @@ class ThreeLayerDisk:
         I_cube_sub = self.build_cube(_xx, _yy, v, beam, dist, Tcmb, f0)
         nv = len(v)
         ny, nx = xx.shape
-        I_cube = np.empty((nv, ny, nx))
-        for i in range(nv):
-            I_cube[i,:,:] = subgrid.binning_onsubgrid(I_cube_sub[i,:,:])
-        return I_cube
+        return subgrid.binning_onsubgrid_layered(I_cube_sub)
 
 
     def build_nested_cube(self, xx, yy, v, xscale, yscale, n_subgrid,
@@ -520,6 +516,7 @@ class SingleLayerDisk:
         _Bv_bg = np.tile(_Bv(Tcmb, f0), (nv,1,1))
         _Bv_T  = np.tile(_Bv(T, f0), (nv,1,1))
         I_cube = (_Bv_T - _Bv_bg) * (1. - np.exp(- _tau))
+        #I_cube /= np.abs(dx * dy) # to conserve flux
 
         # Convolve beam if given
         if beam is not None:
@@ -564,6 +561,19 @@ class SingleLayerDisk:
             nstgrid.binning_onsubgrid(I_cube_sub[i,:,:])
 
         return I_cube
+
+
+    def build_cube_subgrid(self, xx, yy, v, nsub = 2,
+        beam = None, dist = 140., Tcmb = 2.73, f0 = 230.,):
+        if nsub < 1:
+            print('ERROR\tbuild_cube_subgrid: nsub must be >= 2.')
+            return 0
+        subgrid = SubGrid2D(xx, yy, nsub = nsub)
+        _xx, _yy = subgrid.xx_sub, subgrid.yy_sub
+        I_cube_sub = self.build_cube(_xx, _yy, v, beam, dist, Tcmb, f0)
+        nv = len(v)
+        ny, nx = xx.shape
+        return subgrid.binning_onsubgrid_layered(I_cube_sub)
 
 
     def build_cont(self, xx, yy, 
@@ -622,10 +632,11 @@ class SingleLayerDisk:
 @dataclass(slots=True)
 class SSDisk:
 
-    Ic: float = 1.
-    rc: float = 1.
-    beta: float = 0.
-    gamma: float = 0.
+    # intensity distribution
+    Ic: float = 1. # intensity at rc
+    rc: float = 1. # critical radius
+    beta: float = 0. # beta
+    gamma: float = 0. # gamma
     inc: float = 0.
     pa: float = 0.
     z0: float = 0.
@@ -633,9 +644,10 @@ class SSDisk:
     hp: float = 0.
     ms: float = 0.
     vsys: float = 0.
+    delv: float = 0. # line width
 
     def set_params(self, Ic = 0, rc = 0, beta = 0, gamma = 0, 
-        inc = 0, pa = 0, z0 = 0, r0 = 0, hp = 0, ms = 0, vsys = 0):
+        inc = 0, pa = 0, z0 = 0, r0 = 0, hp = 0, ms = 0, vsys = 0, delv = 0.):
         '''
 
         Parameters
@@ -660,6 +672,7 @@ class SSDisk:
         self.hp = hp
         self.ms = ms
         self.vsys = vsys
+        self.delv = delv
 
 
     def get_paramkeys(self):

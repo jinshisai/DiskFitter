@@ -210,6 +210,30 @@ class SubGrid2D(object):
         return np.nanmean(d_avg, axis = 0)
 
 
+    def binning_onsubgrid_layered(self, data):
+        nbin = self.nsub
+        dshape = len(data.shape)
+        if dshape == 2:
+            d_avg = np.array([
+                data[i::nbin, i::nbin]
+                for i in range(nbin)
+                ])
+        elif dshape == 3:
+            d_avg = np.array([
+                data[:, i::nbin, i::nbin]
+                for i in range(nbin)
+                ])
+        elif dshape ==4:
+            d_avg = np.array([
+                data[:, :, i::nbin, i::nbin]
+                for i in range(nbin)
+                ])
+        else:
+            print('ERROR\tbinning_onsubgrid_layered: only Nd of data of 2-4 is now supported.')
+            return 0
+        return np.nanmean(d_avg, axis = 0)
+
+
     def binning(self, nbin):
         if nbin%2 == 0:
             xx, yy = self.shift()

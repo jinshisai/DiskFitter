@@ -8,7 +8,7 @@ from astropy import constants, units
 import emcee
 from dataclasses import dataclass
 
-from .grid import Nested2DGrid
+from .grid import Nested2DGrid, SubGrid2D
 from .mpe import BayesEstimator
 
 
@@ -39,8 +39,9 @@ class Fitter(object):
      params_fixed (dict): Fixed parameters
     """
     def __init__(self, model, params_free, params_fixed, 
-        beam = None, dist = 140., build_args = None, sampling = False, 
-        n_subgrid = 8, xscale = 0.5, yscale = 0.5):
+        beam = None, dist = 140., build_args = None, 
+        sampling = False, n_subgrid = 3,
+        n_nstgrid = 1, xscale = 0.5, yscale = 0.5):
         super(Fitter, self).__init__()
         # parameter checks
         _model = model()
@@ -69,6 +70,7 @@ class Fitter(object):
         else [beam, dist]
         self.sampling = sampling
         self.n_subgrid = n_subgrid
+        self.n_nstgrid = n_nstgrid
         self.xscale, self.yscale = xscale, yscale
 
 
@@ -93,8 +95,36 @@ class Fitter(object):
         # labels
         if len(labels) != len(params): labels = self.pfree_keys
 
-        # nested grid
+        # gridding
         if self.n_subgrid > 1:
+            # subgrid
+            subgrid = SubGrid2D(xx, yy)
+            xx_sub, yy_sub = subgrid.xx_sub, subgrid.yy_sub
+
+            # fitting function
+            def fitfuc(xx, yy, v, *params):
+                # safty net
+                if np.all((pranges[0] < np.array([*params])) \
+                    * (np.array([*params]) < pranges[1])) == False:
+                    return np.zeros(
+                        (len(v), xx.shape[1], xx.shape[0])
+                        )[:, smpl_y//2::smpl_y, smpl_x//2::smpl_x]
+
+                # merge free parameters to fixed parameters
+                params_free = dict(zip(self.pfree_keys, [*params]))
+                _params_full = merge_dictionaries(params_free, self.params_fixed)
+                params_full = list(
+                    {k: _params_full[k] for k in self.model_keys}.values()
+                    ) # reordered elements
+
+                # build model cube
+                model = self.model(*params_full)
+                # cube on the original grid
+                modelcube = model.build_cube_subgrid(
+                    xx, yy, v, self.n_subgrid, 
+                    *self.build_args)
+                return modelcube[:, smpl_y//2::smpl_y, smpl_x//2::smpl_x]
+        elif self.n_nstgrid > 1:
             nstgrid = Nested2DGrid(xx, yy)
             xlim = [-np.nanmax(xx) * self.xscale, np.nanmax(xx) * self.xscale]
             ylim = [-np.nanmax(yy) * self.yscale, np.nanmax(yy) * self.yscale]
@@ -108,7 +138,7 @@ class Fitter(object):
                     if np.all((pranges[0] < np.array([*params])) \
                         * (np.array([*params]) < pranges[1])) == False:
                         return np.zeros(
-                            (len(v), xx.shape[0], xx.shape[1])
+                            (len(v), xx.shape[1], xx.shape[0])
                             )[:, smpl_y//2::smpl_y, smpl_x//2::smpl_x]
                     # merge free parameters to fixed parameters
                     params_free = dict(zip(self.pfree_keys, [*params]))
@@ -137,7 +167,7 @@ class Fitter(object):
                     if np.all((pranges[0] < np.array([*params])) \
                         * (np.array([*params]) < pranges[1])) == False:
                         return np.zeros(
-                            (len(v), xx.shape[0], xx.shape[1])
+                            (len(v), xx.shape[1], xx.shape[0])
                             )[:, smpl_y//2::smpl_y, smpl_x//2::smpl_x]
                     # merge free parameters to fixed parameters
                     params_free = dict(zip(self.pfree_keys, [*params]))
@@ -165,7 +195,7 @@ class Fitter(object):
                 if np.all((pranges[0] < np.array([*params])) \
                     * (np.array([*params]) < pranges[1])) == False:
                     return np.zeros(
-                        (len(v), xx.shape[0], xx.shape[1])
+                        (len(v), xx.shape[1], xx.shape[0])
                         )[:, smpl_y//2::smpl_y, smpl_x//2::smpl_x]
                 # merge free parameters to fixed parameters
                 params_free = dict(zip(self.pfree_keys, [*params]))
