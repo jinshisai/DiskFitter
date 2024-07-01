@@ -95,7 +95,7 @@ def beam_convolution(xx, yy, image, beam):
     Iv = convolve(Iv, gaussbeam, mode='same')
 
     # unit
-    #Iv /= np.abs(dx * dy) # per pixel to per user-defined length unit^2
+    Iv /= np.abs(dx * dy) # per pixel to per user-defined length unit^2
     Iv *= np.pi/(4.*np.log(2.)) * beam[0] * beam[1] # to per beam
 
     return Iv

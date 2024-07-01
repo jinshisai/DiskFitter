@@ -5,9 +5,9 @@ import sys
 from scipy.optimize import root, minimize
 from scipy.signal import convolve
 from astropy import constants, units
-import emcee
 import dataclasses
 from dataclasses import dataclass
+import time
 
 from .funcs import beam_convolution, gaussian2d, glnprof_conv
 from .grid import Nested2DGrid, Nested1DGrid, SubGrid2D
@@ -139,11 +139,9 @@ class ThreeLayerDisk:
         def get_Tvt(xx_sky, yy_sky, 
             _fz, zargs, inc, pa, ms, T0, q, r0, tau_c, rc, gamma, _dfz=None):
             # deprojection
-            #print('Start deprojection', self.z0, self.hp, self.inc)
             depr = sky_to_local(xx_sky, yy_sky, 
                 inc, pa + 0.5 * np.pi, _fz, 
-                zargs, _dfz, zarg_lims = [[-0.3, 0.3], [0.1, 100.1], [0., 2.]]) # inc_max = 85.
-            #print('Done deprojection')
+                zargs, _dfz, zarg_lims = [[-0.3, 0.3], [0.1, 100.1], [0., 2.]])
             if type(depr) == int:
                 T = np.full(xx_sky.shape, 1.) # 1 instead of zero to prevent numerical errors
                 vlos  = np.zeros(xx_sky.shape)
@@ -258,24 +256,22 @@ class ThreeLayerDisk:
         #_tau_gr = nstg.binning_onsubgrid(_tau_gr)
 
         # radiative transfer
-        _Bv_cmb = np.tile(_Bv(Tcmb, f0), (nv,1,1))
-        _tau_d  = np.tile(tau_d, (nv,1,1))
-        _Bv_gf  = np.tile(_Bv(T_gf, f0), (nv,1,1))
-        _Bv_gr  = np.tile(_Bv(T_gr, f0), (nv,1,1))
-        _Bv_d   = np.tile(_Bv(T_d, f0), (nv,1,1))
-        c_cmb = _Bv_cmb * (np.exp(- _tau_gf - _tau_d - _tau_gr) - 1.)
-        I_cube = c_cmb + \
-        _Bv_gr * (1. - np.exp(- _tau_gr)) * np.exp(- _tau_gf - _tau_d) + \
-        _Bv_d * (1. - np.exp(- _tau_d)) * np.exp(- _tau_gf) + \
-        _Bv_gf * (1. - np.exp(- _tau_gf))
-
-        # continuum subtraction
-        Idust = (_Bv_d - _Bv_cmb) * (1. - np.exp(- _tau_d))
-        I_cube = I_cube - Idust
-        I_cube /= np.abs(dx * dy) # to conserve flux
+        I_cube = np.zeros((nv, ny, nx))
+        _Bv_cmb = _Bv(Tcmb, f0)
+        _Bv_gf  = _Bv(T_gf, f0)
+        _Bv_gr  = _Bv(T_gr, f0)
+        _Bv_d   = _Bv(T_d, f0)
+        Idust = (_Bv_d - _Bv_cmb) * (1. - np.exp(- tau_d))
+        for i in range(nv):
+            I_cube[i,:,:] = _Bv_cmb * (np.exp(- _tau_gf[i,:,:] - tau_d - _tau_gr[i,:,:]) - 1.) \
+            + _Bv_gr * (1. - np.exp(- _tau_gr[i,:,:])) * np.exp(- _tau_gf[i,:,:] - tau_d) \
+            + _Bv_d * (1. - np.exp(- tau_d)) * np.exp(- _tau_gf[i,:,:]) \
+            + _Bv_gf * (1. - np.exp(- _tau_gf[i,:,:])) \
+            - Idust # contsub
 
         # Convolve beam if given
         if beam is not None:
+            start = time.time()
             I_cube = beam_convolution(xx, yy, I_cube, [beam[0] * dist, beam[1] * dist, beam[2]])
 
         return I_cube
@@ -516,7 +512,6 @@ class SingleLayerDisk:
         _Bv_bg = np.tile(_Bv(Tcmb, f0), (nv,1,1))
         _Bv_T  = np.tile(_Bv(T, f0), (nv,1,1))
         I_cube = (_Bv_T - _Bv_bg) * (1. - np.exp(- _tau))
-        #I_cube /= np.abs(dx * dy) # to conserve flux
 
         # Convolve beam if given
         if beam is not None:
@@ -877,9 +872,10 @@ def sky_to_local(x, y, inc, pa, fz, zargs, dfz = None,
     z0, r0, hp = zargs
     #print('z0, hp, inc: %.2f %.2f %.2f'%(z0, hp, inc * 180./np.pi))
     if z0 == 0.:
-        sol = root(y_solver, y, 
-            args=(x, y, inc, fz, zargs, dfz), method = method,)
-        ydep = sol.x
+        #sol = root(y_solver, y, 
+        #    args=(x, y, inc, fz, zargs, dfz), method = method,)
+        #ydep = sol.x
+        ydep = y / np.cos(inc)
     elif hp == 1.:
         _r = 1.
         _z = np.abs(fz(_r, *zargs))
