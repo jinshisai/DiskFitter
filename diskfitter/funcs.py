@@ -5,7 +5,7 @@ from scipy.signal import convolve
 
 # Gaussians
 # 1D
-def gaussian1d(x, amp, mx, sig):
+def gauss1d(x, amp, mx, sig):
     return amp*np.exp(- 0.5 * (x - mx)**2/(sig**2)) #+ offset
 
 # 2D
