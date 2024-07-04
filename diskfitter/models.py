@@ -256,22 +256,21 @@ class ThreeLayerDisk:
         #_tau_gr = nstg.binning_onsubgrid(_tau_gr)
 
         # radiative transfer
-        I_cube = np.zeros((nv, ny, nx))
         _Bv_cmb = _Bv(Tcmb, f0)
         _Bv_gf  = _Bv(T_gf, f0)
         _Bv_gr  = _Bv(T_gr, f0)
         _Bv_d   = _Bv(T_d, f0)
         Idust = (_Bv_d - _Bv_cmb) * (1. - np.exp(- tau_d))
-        for i in range(nv):
-            I_cube[i,:,:] = _Bv_cmb * (np.exp(- _tau_gf[i,:,:] - tau_d - _tau_gr[i,:,:]) - 1.) \
+        I_cube = np.array([
+            _Bv_cmb * (np.exp(- _tau_gf[i,:,:] - tau_d - _tau_gr[i,:,:]) - 1.) \
             + _Bv_gr * (1. - np.exp(- _tau_gr[i,:,:])) * np.exp(- _tau_gf[i,:,:] - tau_d) \
             + _Bv_d * (1. - np.exp(- tau_d)) * np.exp(- _tau_gf[i,:,:]) \
             + _Bv_gf * (1. - np.exp(- _tau_gf[i,:,:])) \
             - Idust # contsub
+            for i in range(nv)])
 
         # Convolve beam if given
         if beam is not None:
-            start = time.time()
             I_cube = beam_convolution(xx, yy, I_cube, [beam[0] * dist, beam[1] * dist, beam[2]])
 
         return I_cube
