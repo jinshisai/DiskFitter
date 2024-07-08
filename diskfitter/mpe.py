@@ -25,7 +25,7 @@ from .funcs import gauss1d
 
 ### Functions for MCMC
 # Logarithm of prior distribution
-def lnprior(params, pranges):
+def uniform_lnprior(params, pranges):
     # If all parameters are within the given parameter ranges
     if np.all((pranges[0] < params) * (params < pranges[1])):
         return 0.0
@@ -33,7 +33,7 @@ def lnprior(params, pranges):
         return -np.inf
 
 # Logarithm of likelihood function assuming Gaussian distribution
-def lnlike(params, d, derr, fmodel, *x):
+def gauss_lnlike(params, d, derr, fmodel, *x):
     model = fmodel(*x, *params)
 
     # Likelihood function (in log)
@@ -44,9 +44,9 @@ def lnlike(params, d, derr, fmodel, *x):
         return exp
 
 # Logarithm of posterior distribution
-def lnprob(params, pranges, d, derr, fmodel, *x):
-    # According to Bayes' theorem
-    return  lnprior(params, pranges) + lnlike(params, d, derr, fmodel, *x)
+#def lnprob(params, pranges, d, derr, fmodel, *x):
+#    # According to Bayes' theorem
+#    return  lnprior(params, pranges) + lnlike(params, d, derr, fmodel, *x)
 
 
 ### Python class for model fitting
@@ -57,7 +57,8 @@ class BayesEstimator():
 
     # initialize
     def __init__(self, axes: list, data: np.ndarray, 
-        sig_d: float or np.ndarray, model: Callable):
+        sig_d: float or np.ndarray, model: Callable,
+        lnlike: Callable = gauss_lnlike, lnprior: Callable = uniform_lnprior):
         '''
 
         Parameters
@@ -78,6 +79,10 @@ class BayesEstimator():
         # initialize
         self.pini    = None
         self.pranges = None
+
+        # prior/likelihood functions
+        self.lnlike = lnlike
+        self.lnprior = lnprior
 
 
     # Run mcmc
@@ -130,7 +135,7 @@ class BayesEstimator():
         # Initial set of positions for walkers
         # Maximum likelihood
         if optimize_ini:
-            nll = lambda params, args: -lnlike(params, *args) # negative ln likelihood
+            nll = lambda params, args: -self.lnlike(params, *args) # negative ln likelihood
             res = op.minimize(nll, pini, [self.data, self.sig_d, self.model, *self.axes],
                 bounds=[ [pranges[0][i], pranges[1][i]] for i in range(ndim) ],
                 method='Nelder-Mead', tol=1e-3)
@@ -168,6 +173,13 @@ class BayesEstimator():
         self.nwalkers = nwalkers
         self.nburn = nburn
         self.nrun = nrun
+
+
+        # Logarithm of posterior distribution
+        def lnprob(params, pranges, d, derr, fmodel, *x):
+            # According to Bayes' theorem
+            return  self.lnprior(params, pranges) + self.lnlike(params, d, derr, fmodel, *x)
+
 
         # Multi processing
         if npool > 1:
@@ -271,10 +283,10 @@ class BayesEstimator():
         # best parameter
         popt = self.pfit[0]
         # Akaike's Information Criterion (AIC)
-        aic = - 2. * lnlike(popt, self.data, self.sig_d, self.model, *self.axes)\
+        aic = - 2. * self.lnlike(popt, self.data, self.sig_d, self.model, *self.axes)\
          + 2.* self.ndim
         # Bayesian Information Criterion (BIC)
-        bic = - 2. * lnlike(popt, self.data, self.sig_d, self.model, *self.axes)\
+        bic = - 2. * self.lnlike(popt, self.data, self.sig_d, self.model, *self.axes)\
          + self.ndim * np.log(self.data.size)
         # output
         self.criterion = {'AIC': aic, 'BIC': bic}

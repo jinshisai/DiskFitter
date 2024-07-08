@@ -593,6 +593,21 @@ class SingleLayerDisk:
         return Iv
 
 
+    def build_cont_subgrid(self, xx, yy, 
+        beam = None, dist = 140., Tcmb = 2.73, f0 = 230.,
+        nsub = 2):
+        # subgrid
+        subgrid = SubGrid2D(xx, yy, nsub = nsub)
+        _xx, _yy = subgrid.xx_sub, subgrid.yy_sub
+
+        # cube on the original grid
+        Iv = self.build_cont(_xx, _yy,
+        beam = beam, dist = dist, Tcmb = Tcmb, f0 = f0,)
+
+        # return intensity
+        return subgrid.binning_onsubgrid_layered(Iv)
+
+
     def build_nested_cont(self, xx, yy, xscale, yscale, n_subgrid,
         beam = None, dist = 140., Tcmb = 2.73, f0 = 230.,):
         # original grid

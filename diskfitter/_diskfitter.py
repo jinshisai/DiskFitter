@@ -28,6 +28,7 @@ hp     = constants.h.cgs.value # Planck constant [erg s]
 auTOcm = units.au.to('cm') # 1 au (cm)
 
 
+
 # Disk Fitter
 class Fitter(object):
     """docstring for Fitter
@@ -83,15 +84,30 @@ class Fitter(object):
         # drop unecessary axis
         d = np.squeeze(d)
         # sampling step
+        delx = - (xx[0,1] - xx[0,0]) / self.dist # arcsec
+        dely = (yy[1,0] - yy[0,0]) / self.dist   # arcsec
         if self.sampling:
-            delx = - (xx[0,1] - xx[0,0]) / self.dist # arcsec
-            dely = (yy[1,0] - yy[0,0]) / self.dist   # arcsec
             smpl_x = int(self.beam[1] * 0.5 / delx)
             smpl_y = int(self.beam[1] * 0.5 / dely)
             d_smpld = d[:, smpl_y//2::smpl_y, smpl_x//2::smpl_x]
+            Rbeam_pix = 1.
         else:
             smpl_x, smpl_y = 1, 1
+            Rbeam_pix = np.pi/(4.*np.log(2.)) * self.beam[1] * self.beam[0] / delx / dely
             d_smpld = d.copy()
+
+        # log likelihood
+        def lnlike(params, d, derr, fmodel, *x):
+            model = fmodel(*x, *params)
+
+            # Likelihood function (in log)
+            exp = -0.5 * np.nansum((d-model)**2/(derr*derr) 
+                + np.log(2.*np.pi*derr*derr)) / Rbeam_pix
+            if np.isnan(exp):
+                return -np.inf
+            else:
+                return exp
+
         # labels
         if len(labels) != len(params): labels = self.pfree_keys
 
@@ -213,7 +229,8 @@ class Fitter(object):
 
         # fitting
         p0 = list(self.params_free.values())
-        BE = BayesEstimator([xx, yy, v], d_smpld, derr, fitfuc)
+        BE = BayesEstimator([xx, yy, v], d_smpld, derr, fitfuc,
+            lnlike = lnlike)
         BE.run_mcmc(p0, pranges, outname=outname,
             nwalkers = nwalkers, nrun = nrun, nburn = nburn, labels = labels,
             show_progress = show_progress, optimize_ini = optimize_ini, moves = moves,
@@ -244,20 +261,57 @@ class Fitter(object):
         # drop unecessary axis
         d = np.squeeze(d)
         # sampling step
+        delx = - (xx[0,1] - xx[0,0]) / self.dist # arcsec
+        dely = (yy[1,0] - yy[0,0]) / self.dist # arcsec
         if self.sampling:
-            delx = - (xx[0,1] - xx[0,0]) / self.dist # arcsec
-            dely = (yy[1,0] - yy[0,0]) / self.dist # arcsec
             smpl_x = int(self.beam[1] * 0.5 / delx)
             smpl_y = int(self.beam[1] * 0.5 / dely)
             d_smpld = d[::smpl_y, ::smpl_x]
         else:
             smpl_x, smpl_y = 1, 1
+            Rbeam_pix = np.pi/(4.*np.log(2.)) * self.beam[1] * self.beam[0] / delx / dely
             d_smpld = d.copy()
+
         # labels
         if len(labels) != len(params): labels = self.pfree_keys
 
+        # log likelihood
+        def lnlike(params, d, derr, fmodel, *x):
+            model = fmodel(*x, *params)
+
+            # Likelihood function (in log)
+            exp = -0.5 * np.nansum((d-model)**2/(derr*derr) 
+                + np.log(2.*np.pi*derr*derr)) / Rbeam_pix
+            if np.isnan(exp):
+                return -np.inf
+            else:
+                return exp
+
         # nested grid
         if self.n_subgrid > 1:
+            # subgrid
+            subgrid = SubGrid2D(xx, yy)
+            xx_sub, yy_sub = subgrid.xx_sub, subgrid.yy_sub
+
+            # fitting function
+            def fitfuc(xx, yy, *params):
+                # safty net
+                if np.all((pranges[0] < np.array([*params])) \
+                    * (np.array([*params]) < pranges[1])) == False:
+                    return np.zeros(xx.shape)[smpl_y//2::smpl_y, smpl_x//2::smpl_x]
+                # merge free parameters to fixed parameters
+                params_free = dict(zip(self.pfree_keys, [*params]))
+                _params_full = merge_dictionaries(params_free, self.params_fixed)
+                params_full = list(
+                    {k: _params_full[k] for k in self.model_keys}.values()
+                    ) # reordered elements
+
+                # build model cube
+                model = self.model(*params_full)
+                # cube on the original grid
+                modelcont = model.build_cont_subgrid(xx, yy, *self.build_args)
+                return modelcont[smpl_y//2::smpl_y, smpl_x//2::smpl_x]
+        elif self.n_nstgrid > 1:
             nstgrid = Nested2DGrid(xx, yy)
             xlim = [-np.nanmax(xx) * self.xscale, np.nanmax(xx) * self.xscale]
             ylim = [-np.nanmax(yy) * self.yscale, np.nanmax(yy) * self.yscale]
@@ -338,7 +392,8 @@ class Fitter(object):
 
         # fitting
         p0 = list(self.params_free.values())
-        BE = BayesEstimator([xx, yy], d_smpld, derr, fitfuc)
+        BE = BayesEstimator([xx, yy], d_smpld, derr, fitfuc,
+            lnlike = lnlike)
         BE.run_mcmc(p0, pranges, outname=outname,
             nwalkers = nwalkers, nrun = nrun, nburn = nburn, labels = labels,
             show_progress = show_progress, optimize_ini = optimize_ini, moves = moves,
