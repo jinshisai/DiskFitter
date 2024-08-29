@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 
 
 
-class Nested2DGrid_new(object):
+class Nested2DGrid(object):
     """docstring for NestedGrid"""
     def __init__(self, x, y,
         xlim, ylim, nsub, 
@@ -510,7 +510,6 @@ class Nested3DGrid(object):
 
             # go next layer
             nx, ny, nz = self.ngrids[l-1] # size of the upper layer
-            d_col = np.empty((nx, ny, nz))
             d_col = np.full((nx, ny, nz), np.nan)
 
             # insert collapsed data
@@ -723,7 +722,7 @@ def nestgrid_3D(x, y, z, xlim, ylim, zlim, nsub, decimals = 4.):
 
 
 
-class Nested2DGrid(object):
+class Nested2DGrid_old(object):
     """docstring for NestedGrid"""
     def __init__(self, xx, yy, precision = 4):
         super(Nested2DGrid, self).__init__()

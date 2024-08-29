@@ -238,7 +238,7 @@ class BayesEstimator():
             else:
                 print('Credible interval: %i percent'%(credible_interval*100.))
                 print('mode lower upper')
-                f.write('# param 50th %ith %ith\n'%(50*(1. - credible_interval), 50*(1. + credible_interval)))
+                f.write('# param 50th %.fth %.fth\n'%(50*(1. - credible_interval), 50*(1. + credible_interval)))
                 for i in range(ndim):
                     p_mcmc = np.percentile(samples[:, i], 
                         [50*(1. - credible_interval), 50, 50*(1. + credible_interval)])

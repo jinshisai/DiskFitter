@@ -6,9 +6,11 @@ from scipy.optimize import root, minimize
 from scipy.signal import convolve
 from astropy import constants, units
 import emcee
+from datetime import datetime
 from dataclasses import dataclass
+from typing import Callable
 
-from .models import TTLDisk, ThreeLayerDisk, SingleLayerDisk
+from .models import MultiLayerDisk, ThreeLayerDisk, SingleLayerDisk
 from .grid import Nested2DGrid, SubGrid2D
 from .mpe import BayesEstimator
 
@@ -430,36 +432,14 @@ class Fit3DModel(object):
         beam = None, dist = 140., build_args = None, 
         sampling = False, n_subgrid = 1,
         n_nstgrid = 1, xscale = 0.5, yscale = 0.5, zscale = 0.5):
-        super(Fit3DModel, self).__init__()
-        # parameter checks
-        _model = model()
-        _model_keys = _model.get_paramkeys()
-        _input_keys = list(params_free.keys()) + list(params_fixed.keys())
-        if sorted(_model_keys) != sorted(_input_keys):
-            print('ERROR\tModelFitter: input keys do not match model input parameters.')
-            print('ERROR\tModelFitter: input parameters must be as follows:')
-            print(_model_keys)
-            return 0
-
-        # set model
-        self.model_keys = _model_keys
-        self.params_free = params_free
-        self.pfree_keys = list(params_free.keys())
-        self.params_fixed = params_fixed
-        self.pfixed_keys = list(params_fixed.keys())
-        _params = merge_dictionaries(params_free, params_fixed)
-        self.params_ini = list(
-            {k: _params[k] for k in _model_keys}.values()
-            ) # re-ordered elements
-        self.model = model #(*self.params_ini)
-        self.beam = beam
-        self.dist = dist
-        self.build_args = [beam, dist] + build_args if build_args is not None\
-        else [beam, dist]
-        self.sampling = sampling
-        self.n_subgrid = n_subgrid
-        self.n_nstgrid = n_nstgrid
-        self.xscale, self.yscale = xscale, yscale
+        super(DiMO, self).__init__()
+        '''
+        model, params_free, params_fixed, 
+            beam = beam, dist = dist, build_args = build_args, 
+            sampling = sampling, n_subgrid = n_subgrid, n_nstgrid = n_nstgrid, 
+            xscale = xscale, yscale = yscale, zscale = zscale
+        '''
+        #super(Fit3DModel, self).__init__()
 
 
     # define fitting function
@@ -578,7 +558,7 @@ class Fit3DModel(object):
 
 
 # Disk Model Optimization
-class DiMO(Fit3DModel):#, FitThinModel):
+class DiMO(object):#, FitThinModel):
     """docstring for Fitter
 
     Args
@@ -590,17 +570,302 @@ class DiMO(Fit3DModel):#, FitThinModel):
     def __init__(self, model, params_free, params_fixed, 
         beam = None, dist = 140., build_args = None, 
         sampling = False, n_subgrid = 1,
-        n_nstgrid = 1, xscale = 0.5, yscale = 0.5, zscale = 0.5):
-        super().__init__(model, params_free, params_fixed, 
-            beam = beam, dist = dist, build_args = build_args, 
-            sampling = sampling, n_subgrid = n_subgrid, n_nstgrid = n_nstgrid, 
-            xscale = xscale, yscale = yscale, zscale = zscale)
+        n_nest = None, x_nestlim = None, y_nestlim = None, z_nestlim = None,
+        xscale = 0.5, yscale = 0.5, zscale = 0.5):
+
+        # parameter checks
+        _model = model()
+        _model_keys = _model.get_paramkeys()
+        _input_keys = list(params_free.keys()) + list(params_fixed.keys())
+        if sorted(_model_keys) != sorted(_input_keys):
+            print('ERROR\tModelFitter: input keys do not match model input parameters.')
+            print('ERROR\tModelFitter: input parameters must be as follows:')
+            print(_model_keys)
+            return 0
+
+        # set model
+        self.model_keys = _model_keys
+        self.params_free = params_free
+        self.pfree_keys = list(params_free.keys())
+        self.params_fixed = params_fixed
+        self.pfixed_keys = list(params_fixed.keys())
+        _params = merge_dictionaries(params_free, params_fixed)
+        self.params_ini = list(
+            {k: _params[k] for k in _model_keys}.values()
+            ) # re-ordered elements
+        self.model = model #(*self.params_ini)
+        self.beam = beam
+        self.dist = dist
+        self.build_args = [beam, dist] + build_args if build_args is not None\
+        else [beam, dist]
+        self.sampling = sampling
+        self.n_subgrid = n_subgrid
+        self.n_nest = n_nest
+        self.x_nestlim, self.y_nestlim, self.z_nestlim = x_nestlim, y_nestlim, z_nestlim
+        self.xscale, self.yscale = xscale, yscale
+
+
+    def fit_cube(self, params: dict, pranges:list, 
+        d: np.ndarray, derr: float or np.ndarray, axes: list,
+        outname = 'modelfitter_results', nwalkers=None, 
+        nrun=2000, nburn=1000, labels=[], show_progress=True, 
+        optimize_ini=False, moves=emcee.moves.WalkMove(), symmetric_error=False,
+        npool = 1, f_rand_init = 0.1):
+        '''
+
+        Parameters
+        ----------
+        params (dict):
+        pranges (list):
+        d (array):
+        derr (float or array):
+        axes (list): A list containing all axes. Must be [x, y, v] or [x, y, z, v].
+        '''
+
+        if len(axes) == 3:
+            x, y, v = axes
+        elif len(axes) == 4:
+            x, y, z, v = axes
+            self.fit_cube_3Dmodel(params, pranges, d, derr, x, y, z, v,
+                outname = outname, nwalkers = nwalkers, nrun = nrun, nburn = nburn,
+                labels = [], show_progress = show_progress, optimize_ini = optimize_ini, 
+                moves = moves, symmetric_error = symmetric_error, npool = npool,
+                f_rand_init = f_rand_init)
+        else:
+            print('ERROR\tfit_cube: axes must consist of three or four axes.')
+            return 0
+
+
+    # define fitting function
+    def fit_cube_3Dmodel(self, params, pranges, d, derr, x, y, z, v,
+        outname = 'modelfitter_results', nwalkers=None, 
+        nrun=2000, nburn=1000, labels=[], show_progress=True, 
+        optimize_ini=False, moves=emcee.moves.WalkMove(), symmetric_error=False,
+        npool = 1, f_rand_init = 0.1):
+        # drop unecessary axis
+        d = np.squeeze(d)
+        # dimentions
+        nx, ny, nz = len(x), len(y), len(z)
+        # sampling step
+        delx = - (x[1] - x[0]) / self.dist # arcsec
+        dely = (y[1] - y[0]) / self.dist   # arcsec
+        if self.sampling:
+            smpl_x = int(self.beam[1] * 0.5 / delx)
+            smpl_y = int(self.beam[1] * 0.5 / dely)
+            d_smpld = d[:, smpl_y//2::smpl_y, smpl_x//2::smpl_x]
+            Rbeam_pix = 1.
+        else:
+            smpl_x, smpl_y = 1, 1
+            Rbeam_pix = np.pi/(4.*np.log(2.)) * self.beam[1] * self.beam[0] / delx / dely
+            d_smpld = d.copy()
+
+        # log likelihood
+        def lnlike(params, d, derr, fmodel, *x):
+            model = fmodel(*x, *params)
+
+            # Likelihood function (in log)
+            exp = -0.5 * np.nansum((d-model)**2/(derr*derr) 
+                + np.log(2.*np.pi*derr*derr)) / Rbeam_pix
+            if np.isnan(exp):
+                return -np.inf
+            else:
+                return exp
+
+        # labels
+        if len(labels) != len(params): labels = self.pfree_keys
+
+        # gridding
+        if self.n_subgrid > 1:
+            # subgrid
+            subgrid = SubGrid2D(x, y)
+            x_sub, y_sub = subgrid.x_sub, subgrid.y_sub
+            xx, yy, zz = np.meshgrid(x_sub, y_sub, z, indexing = 'ij')
+            axes = [xx, yy, zz, v]
+            # fitting function
+            def fitfunc(xx, yy, zz, v, *params):
+                # safty net
+                if np.all((pranges[0] < np.array([*params])) \
+                    * (np.array([*params]) < pranges[1])) == False:
+                    return np.zeros(
+                        (len(v), ny, nx)
+                        )[:, smpl_y//2::smpl_y, smpl_x//2::smpl_x]
+
+                # merge free parameters to fixed parameters
+                params_free = dict(zip(self.pfree_keys, [*params]))
+                _params_full = merge_dictionaries(params_free, self.params_fixed)
+                params_full = list(
+                    {k: _params_full[k] for k in self.model_keys}.values()
+                    ) # reordered elements
+
+                # build model cube
+                model = self.model(*_params_full)
+                # cube on the original grid
+                modelcube = model.build_cube(
+                    xx, yy, zz, v, *self.build_args)
+                modelcube = subgrid.binning_onsubgrid_layered(modelcube)
+                return modelcube[:, smpl_y//2::smpl_y, smpl_x//2::smpl_x]
+        elif self.n_nest is not None:
+            axes = [x, y, z, v]
+            def fitfunc(x, y, z, v, *params):
+                # safty net
+                if np.all((pranges[0] < np.array([*params])) \
+                    * (np.array([*params]) < pranges[1])) == False:
+                    return np.zeros(
+                        (len(v), ny, nx)
+                        )[:, smpl_y//2::smpl_y, smpl_x//2::smpl_x]
+
+                # merge free parameters to fixed parameters
+                params_free = dict(zip(self.pfree_keys, [*params]))
+                _params_full = merge_dictionaries(params_free, self.params_fixed)
+                params_full = list(
+                    {k: _params_full[k] for k in self.model_keys}.values()
+                    ) # reordered elements
+
+                # build model cube
+                model = self.model(*params_full)
+                # cube on the original grid
+                modelcube = model.build_nested_cube(
+                    x.copy(), y.copy(), z.copy(), v.copy(), 
+                    self.x_nestlim.copy(), self.y_nestlim.copy(), 
+                    self.z_nestlim.copy(), self.n_nest,
+                    *self.build_args)
+                return modelcube[:, smpl_y//2::smpl_y, smpl_x//2::smpl_x]
+        else:
+            xx, yy, zz = np.meshgrid(x, y, z, indexing = 'ij')
+            axes = [xx, yy, zz, v]
+            def fitfunc(xx, yy, zz, v, *params):
+                # safty net
+                if np.all((pranges[0] < np.array([*params])) \
+                    * (np.array([*params]) < pranges[1])) == False:
+                    return np.zeros(
+                        (len(v), ny, nx)
+                        )[:, smpl_y//2::smpl_y, smpl_x//2::smpl_x]
+                # merge free parameters to fixed parameters
+                params_free = dict(zip(self.pfree_keys, [*params]))
+                _params_full = merge_dictionaries(params_free, self.params_fixed)
+                params_full = list(
+                    {k: _params_full[k] for k in self.model_keys}.values()
+                    ) # reordered elements
+                #del params_free, _params_full # release memory
+
+                # build model cube
+                model = self.model(*params_full)
+                modelcube = model.build_cube(xx, yy, zz, v, *self.build_args)
+                return modelcube[:, smpl_y//2::smpl_y, smpl_x//2::smpl_x]
+
+        # fitting
+        p0 = list(self.params_free.values())
+        BE = BayesEstimator(axes, d, derr, fitfunc, lnlike = lnlike)
+        BE.run_mcmc(p0, pranges, outname=outname,
+            nwalkers = nwalkers, nrun = nrun, nburn = nburn, labels = labels,
+            show_progress = show_progress, optimize_ini = optimize_ini, moves = moves,
+            symmetric_error = symmetric_error, npool = npool, f_rand_init = f_rand_init)
+        self.popt = BE.pfit[0]
+        self.perr = BE.pfit[1:]
+
+
+        # best solution
+        params_free = dict(zip(self.pfree_keys, [*self.popt]))
+        _params_full = merge_dictionaries(params_free, self.params_fixed)
+        params_full = list(
+            {k: _params_full[k] for k in self.model_keys}.values()
+            )
+        smpl_y, smpl_x = 1, 1
+        modelcube = fitfunc(xx, yy, zz, v, *self.popt) if self.n_nest is None else fitfunc(x, y, z, v, *self.popt)
+        self.modelcube = modelcube
+
+        self.writeout_fitres(outname, BE.criterion)
+
+        return modelcube
+
+
+
+    def writeout_fitres(self, outname, criterion = None):
+        # best solution
+        params_free = dict(zip(self.pfree_keys, [*self.popt]))
+        _params_full = merge_dictionaries(params_free, self.params_fixed)
+        params_full = list(
+            {k: _params_full[k] for k in self.model_keys}.values()
+            )
+
+        # overwrite default output
+        outtxtfile = outname + '_results.txt'
+        dt = datetime.now()
+        dtstr = dt.strftime('%Y-%m-%d %H:%M:%S')
+        ne, _ = self.popt.shape
+        labels = self.model_keys
+        perr_indx = dict(zip(self.pfree_keys, 
+            [*np.arange(0,len(self.pfree_keys))]))
+        with open(outtxtfile, '+w') as f:
+            if ne == 2:
+                f.write('# param mean sigma\n')
+                # make a full perr list
+                for i, k in enumerate(self.model_keys):
+                    if k in self.pfree_keys:
+                        indx = perr_indx[k]
+                        f.write(
+                            '%s %13.6e %13.6e\n'%(labels[i], params_full[i], self.perr[indx])
+                            )
+                    else:
+                        f.write(
+                            '%s %13.6e %13.6e\n'%(labels[i], params_full[i], 0.)
+                            )
+            elif ne == 3:
+                f.write('# param 50th %.fth %.fth\n'%(50*(1. - credible_interval), 50*(1. + credible_interval)))
+                for i, k in enumerate(self.model_keys):
+                    if k in self.pfree_keys:
+                        indx = perr_indx[k]
+                        f.write(
+                            '%s %13.6e %13.6e %13.6e\n'%(labels[i], 
+                                params_full[i], self.perr[0, indx], self.perr[1, indx])
+                            )
+                    else:
+                        f.write(
+                            '%s %13.6e %13.6e %13.6e\n'%(labels[i], params_full[i], 0., 0.)
+                            )
+            if criterion is not None:
+                f.write('# criterion')
+                for k in criterion.keys():
+                    f.write('\n# %s %.4f'%(k, criterion[k]))
+        return modelcube
 
 
 def merge_dictionaries(dict1, dict2):
     merged_dict = dict1.copy()
     merged_dict.update(dict2)
     return merged_dict
+
+
+def mathlabels(pylabels):
+    labels = {
+    'Td0': r'$T_{\mathrm{d},0}$',
+    'qd': r'$q_\mathrm{d}$',
+    'log_tau_dc': r'$\log \tau_\mathrm{c,d}$',
+    'rc_d': r'$R_\mathrm{c,d}$',
+    'gamma_d': r'$\gamma_\mathrm{d}$',
+    'Tg0': r'$T_{\mathrm{g},0}$',
+    'qg': r'$q_\mathrm{g}$',
+    'log_tau_gc': r'$\log \tau_\mathrm{c,g}$',
+    'rc_g': r'$R_\mathrm{c,g}$',
+    'gamma_g': r'$\gamma_\mathrm{g}$',
+    'z0': r'$z_0$',
+    'pz': r'$p_z$',
+    'h0': r'$H_0$',
+    'ph': r'$p_H$',
+    'inc': r'$i$',
+    'pa': r'$PA$',
+    'ms': r'$M_\ast$',
+    'vsys': r'$v_\mathrm{sys}$',
+    'dx0': r'$\delta x_0$',
+    'dy0': r'$\delta y_0$',
+    'r0': r'$R_0$',
+    'dv': r'$\Delta v$',
+    'pdv': r'$p_{\Delta v}$',
+    'delv': r'$\Delta v$'
+    }
+    keys = labels.keys()
+
+    return [labels[i] if i in keys else i for i in pylabels]
 
 
 

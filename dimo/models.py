@@ -31,7 +31,7 @@ auTOcm = units.au.to('cm') # 1 au (cm)
 
 
 @dataclass(slots=True)
-class TTLDisk:
+class MultiLayerDisk:
     '''
     A disk model with Two Thick Layers (TTL) with a thin dust layer.
     '''
@@ -64,13 +64,15 @@ class TTLDisk:
     # reference radius
     r0: float = 1.
     # line width
-    delv: float = 0.
+    dv: float = 0.
+    pdv: float = 0.25
+
 
     def set_params(self, 
         Td0 = 400., qd = 0.5, log_tau_dc = 0., rc_d = 100., gamma_d = 1., 
         Tg0 = 400., qg = 0.5, log_tau_gc = 0., rc_g = 100., gamma_g = 1., 
         z0 = 0., pz = 1.25, h0 = 0., ph = 0., inc = 0., pa = 0., ms = 1., vsys = 0, 
-        dx0=0., dy0=0., r0 = 1., delv = 0.):
+        dx0=0., dy0=0., r0 = 1., dv = 0., pdv = 0.25):
         '''
 
         Parameters
@@ -122,7 +124,8 @@ class TTLDisk:
         # reference radius
         self.r0 = r0
         # line width
-        self.delv = delv
+        self.dv = dv
+        self.pdv = pdv
 
 
     def get_paramkeys(self):
@@ -135,13 +138,22 @@ class TTLDisk:
             print(f'{v.name}: ({v.type.__name__}) = {getattr(self, v.name)}')
 
 
-    def build_gas_layer(self, xp, yp, zp, rin = 0.1):
+    def build_gas_layer(self, xp, yp, zp, rin = 0.1, 
+        adoptive_zaxis = True, cosi_lim = 0.5):
         _pa_rad = np.radians(self.pa)
         _inc_rad = np.radians(self.inc)
         _fz = lambda r, z0, r0, pz: z0*(r/r0)**pz
 
+        # sky to local
         x, y = rot2d(xp - self.dx0, yp - self.dy0, _pa_rad + 0.5 * np.pi)
-        x, y, z = xrot(x, y, zp, _inc_rad)
+        # adoptive z axis
+        if adoptive_zaxis & (np.abs(np.cos(_inc_rad)) > cosi_lim):
+            # center origin of z axis in the disk midplane
+            zoffset = - np.tan(_inc_rad) * y # zp_mid(xp, yp)
+            _zp = zp + zoffset # shift z center
+            x, y, z = xrot(x, y, _zp, _inc_rad)
+        else:
+            x, y, z = xrot(x, y, zp, _inc_rad)
 
         # local cylindrical coordinates
         R = np.sqrt(x * x + y * y) # radius
@@ -224,7 +236,10 @@ class TTLDisk:
         tau_rho_gf = tau_rho_gf.clip(1.e-30, None)
         tau_rho_gr = tau_rho_gr.clip(1.e-30, None)
 
-        return T_g, vlos, tau_rho_gf, tau_rho_gr
+        # line width
+        dv = self.dv * (R / self.r0)**(- self.pdv) if self.dv > 0. else self.dv
+
+        return T_g, vlos, tau_rho_gf, tau_rho_gr, dv
 
 
     def build_dust_layer(self, xp, yp, rin = 0.1):
@@ -257,7 +272,7 @@ class TTLDisk:
 
     def build(self, x, y, z, rin = 0.1):
         # get temperature and volume tau
-        T_g, vlos, tau_rho_gf, tau_rho_gr = self.build_gas_layer(x, y, z, rin = rin)
+        T_g, vlos, tau_rho_gf, tau_rho_gr, dv = self.build_gas_layer(x, y, z, rin = rin)
         T_d, tau_d = self.build_dust_layer(x[:,:,0].T, y[:,:,0].T, rin = rin)
         return T_g, vlos, tau_rho_gf, tau_rho_gr, T_d, tau_d
 
@@ -265,7 +280,7 @@ class TTLDisk:
     def build_cube(self, x, y, z, v, 
         beam = None, dist = 140., Tcmb = 2.73, f0 = 230.,):
         # get temperature and volume tau
-        T_g, vlos, tau_rho_gf, tau_rho_gr = self.build_gas_layer(x, y, z)
+        T_g, vlos, tau_rho_gf, tau_rho_gr, dv = self.build_gas_layer(x, y, z)
         T_d, tau_d = self.build_dust_layer(x[:,:,0].T, y[:,:,0].T)
         vlos += self.vsys
 
@@ -276,25 +291,17 @@ class TTLDisk:
         dz = z[0,0,1] - z[0,0,0]
         #print(dx, dy)
         nv = len(v)
-        dv = np.mean(v[1:] - v[:-1])
-        ve = np.hstack([v - dv * 0.5, v[-1] + 0.5 * dv])
+        delv = np.mean(v[1:] - v[:-1])
+        ve = np.hstack([v - delv * 0.5, v[-1] + 0.5 * delv])
 
-        # density to tau_v
-        '''
-        Tv_gf = np.transpose(
-            waverage_to_cube(T_g, tau_rho_gf, vlos, ve), (0,2,1))
-        Tv_gr = np.transpose(
-            waverage_to_cube(T_g, tau_rho_gr, vlos, ve), (0,2,1))
-        tau_v_gf = np.transpose(
-            integrate_to_cube(tau_rho_gf, vlos, ve, dz), (0,2,1))
-        tau_v_gr = np.transpose(
-            integrate_to_cube(tau_rho_gr, vlos, ve, dz), (0,2,1))
-        #print(np.nanmax(Tv_gf), np.nanmax(Tv_gr))
-        '''
-
-        Tv_gf, Tv_gr, tau_v_gf, tau_v_gr = np.transpose(
-            ttldisk.Tt_to_cube(T_g, tau_rho_gf, tau_rho_gr, vlos, ve, dz),
-            (0,1,3,2))
+        if self.dv > 0.:
+            Tv_gf, Tv_gr, tau_v_gf, tau_v_gr = np.transpose(
+            ttldisk.Ttdv_to_cube(T_g, tau_rho_gf, tau_rho_gr, vlos, dv, ve, dz),
+            (0,3,2,1))
+        else:
+            Tv_gf, Tv_gr, tau_v_gf, tau_v_gr = np.transpose(
+                ttldisk.Tt_to_cube(T_g, tau_rho_gf, tau_rho_gr, vlos, ve, dz),
+                (0,1,3,2))
 
         # radiative transfer
         _Bv = lambda T, v: Bvppx(T, v, dx, dy, dist = dist, au = True)
@@ -315,9 +322,10 @@ class TTLDisk:
 
     def build_nested_cube(self, x, y, z, v, 
         xlim = None, ylim = None, zlim = None, nsub = [3],
-        beam = None, dist = 140., Tcmb = 2.73, f0 = 230., reslim = 5,):
+        beam = None, dist = 140., Tcmb = 2.73, f0 = 230.,):
         # grid
-        nstg = Nested3DGrid(x, y, z, xlim, ylim, zlim, nsub, nlevels = len(nsub), reslim = reslim)
+        nstg = Nested3DGrid(x, y, z, xlim, ylim, zlim, nsub, nlevels = len(nsub))
+        nstg2D = Nested2DGrid(x, y, xlim, ylim, nsub, nlevels = len(nsub))
 
         # velocity grid
         nx, ny, nz = nstg.nx, nstg.ny, nstg.nz
@@ -325,40 +333,66 @@ class TTLDisk:
         dy = nstg.dy
         dz = nstg.dz
         nv = len(v)
-        dv = np.mean(v[1:] - v[:-1])
-        ve = np.hstack([v - dv * 0.5, v[-1] + 0.5 * dv])
+        delv = np.mean(v[1:] - v[:-1])
+        ve = np.hstack([v - delv * 0.5, v[-1] + 0.5 * delv])
 
         # for each nested level
-        T_gf = [None] * nstg.nlevels
-        T_gr = [None] * nstg.nlevels
+        T_g = [None] * nstg.nlevels
         T_d = [None] * nstg.nlevels
         tau_rho_gf = [None] * nstg.nlevels
         tau_rho_gr = [None] * nstg.nlevels
         tau_d = [None] * nstg.nlevels
         vlos = [None] * nstg.nlevels
+        dv = [None] * nstg.nlevels
         for l in range(nstg.nlevels):
             # get temperature and volume tau
-            _T_g, _vlos, _tau_rho_gf, _tau_rho_gr, _T_d,  _tau_d = \
-            self.build(nstg.xnest[l].copy(), nstg.ynest[l].copy(), nstg.znest[l])
-            vlos += self.vsys
+            _T_g, _vlos, _tau_rho_gf, _tau_rho_gr, _dv = \
+            self.build_gas_layer(nstg.xnest[l].copy(), 
+                nstg.ynest[l].copy(), nstg.znest[l].copy())
+            _T_d, _tau_d = self.build_dust_layer(
+                nstg2D.xnest[l].copy(), nstg2D.ynest[l].copy())
+            _vlos += self.vsys
+            T_g[l] = _T_g
+            vlos[l] = _vlos
+            tau_rho_gf[l] = _tau_rho_gf
+            tau_rho_gr[l] = _tau_rho_gr
+            T_d[l] = _T_d
+            tau_d[l] = _tau_d
+            dv[l] = _dv
 
-            # density to tau_v
-            tau_v_gf = collapse_to_cube(tau_rho_gf, vlos, ve)
-            tau_v_gr = collapse_to_cube(tau_rho_gr, vlos, ve)
+        T_g = nstg.collapse(T_g)
+        vlos = nstg.collapse(vlos)
+        tau_rho_gf = nstg.collapse(tau_rho_gf)
+        tau_rho_gr = nstg.collapse(tau_rho_gr)
+        T_d = nstg2D.collapse(T_d)
+        tau_d = nstg2D.collapse(tau_d)
+
+
+        # to cube
+        if self.dv > 0.:
+            dv = nstg.collapse(dv)
+            Tv_gf, Tv_gr, tau_v_gf, tau_v_gr = np.transpose(
+            ttldisk.Ttdv_to_cube(T_g, tau_rho_gf, tau_rho_gr, vlos, dv, ve, dz),
+            (0,3,2,1)) # np.transpose(Tt_cube, (0,1,3,2))
+        else:
+            Tv_gf, Tv_gr, tau_v_gf, tau_v_gr = np.transpose(
+            ttldisk.Tt_to_cube(T_g, tau_rho_gf, tau_rho_gr, vlos, ve, dz),
+            (0,1,3,2))
+
 
         # radiative transfer
         _Bv = lambda T, v: Bvppx(T, v, dx, dy, dist = dist, au = True)
         #_Bv = lambda T, v: Bv(T, v)
         _Bv_cmb = _Bv(Tcmb, f0)
-        _Bv_gf  = _Bv(T_gf, f0)
-        _Bv_gr  = _Bv(T_gr, f0)
+        _Bv_gf  = _Bv(Tv_gf, f0)
+        _Bv_gr  = _Bv(Tv_gr, f0)
         _Bv_d   = _Bv(T_d, f0)
-        Iv = solve_3LRT(_Bv_gf, _Bv_gr, _Bv_d, 
+        Iv = solve_box3LRT(_Bv_gf, _Bv_gr, _Bv_d, 
             tau_v_gf, tau_v_gr, tau_d, _Bv_cmb, nv)
 
         # Convolve beam if given
         if beam is not None:
-            Iv = beam_convolution(x, y, Iv, [beam[0] * dist, beam[1] * dist, beam[2]])
+            Iv = beam_convolution(nstg2D.xx, nstg2D.yy, Iv, [beam[0] * dist, beam[1] * dist, beam[2]])
 
         return Iv
 
@@ -1190,6 +1224,22 @@ def rot2d(x, y, ang):
 
 def xrot(x, y, z, ang):
     return x, y * np.cos(ang) - z * np.sin(ang), y * np.sin(ang) + z * np.cos(ang)
+
+def yp2y(yp, z, inc):
+    """
+    Deproject y' of the plane of the sky (PoS) coordindates to y of the disk coordinates.
+    The height on the disk coordindate, z, must be given.
+     yp = y cos(i) + z sin(i)
+    therefore,
+     y = (yp - z sin(i)) / cos(i)
+
+    Parameters
+    ----------
+     yp (float or array): y' of PoS coordinates (any unit of distance.
+     z (float or array): z of the disk local coordinates (any unit of distance).
+     inc (float): Inclination angle of the disk (rad).
+    """
+    return (yp - z * np.sin(inc)) / np.cos(inc)
 
 
 def sky_to_local(x, y, inc, pa, fz, zargs, dfz = None,
