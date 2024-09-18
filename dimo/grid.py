@@ -311,8 +311,8 @@ class Nested2DGrid(object):
 class Nested3DGrid(object):
     """docstring for NestedGrid"""
     def __init__(self, x, y, z, 
-        xlim, ylim, zlim, nsub, 
-        nlevels = 1, reslim = 5,):
+        xlim = None, ylim = None, zlim = None, 
+        nsub = None, reslim = 5,):
         super(Nested3DGrid, self).__init__()
         # save axes of the mother grid
         self.x = x
@@ -336,6 +336,7 @@ class Nested3DGrid(object):
 
         # nested grid
         self.nsub = nsub
+        nlevels = 0 if nsub is None else len(nsub)
         self.nlevels = nlevels + 1
         # original 1D axes
         self.xaxes = [None] * (nlevels + 1)
@@ -375,18 +376,6 @@ class Nested3DGrid(object):
             self.zlim = [ze[0], ze[-1]]
 
 
-        '''
-        if (_check := self.check_symmetry(precision))[0]:
-            pass
-        else:
-            print('ERROR\tNested2DGrid: Input grid must be symmetric but not.')
-            print('ERROR\tNested2DGrid: Condition.')
-            print('ERROR\tNested2DGrid: [xcent, ycent, dx, dy]')
-            print('ERROR\tNested2DGrid: ', _check[1])
-            return None
-        '''
-
-
     def get_nestinglim(self, reslim = 5):
         xlim = []
         ylim = []
@@ -399,20 +388,6 @@ class Nested3DGrid(object):
             _dx, _dy, _dz = np.array([_dx, _dy, _dz]) / self.nsub[l]
 
         return xlim, ylim, zlim
-
-
-    def check_symmetry(self, decimals = 5):
-        nx, ny = self.nx, self.ny
-        xc = np.round(self.xc, decimals)
-        yc = np.round(self.yc, decimals)
-        _xcent = (xc == 0.) if nx%2 == 1 else (xc == - np.round(self.xx[ny//2 - 1, nx//2 - 1], decimals))
-        _ycent = (yc == 0.) if ny%2 == 1 else (yc == - np.round(self.yy[ny//2 - 1, nx//2 - 1], decimals))
-        delxs = (self.xx[1:,1:] - self.xx[:-1,:-1]) / self.dx
-        delys = (self.yy[1:,1:] - self.yy[:-1,:-1]) / self.dy
-        _xdel = (np.round(delxs, decimals) == 1. ).all()
-        _ydel = (np.round(delys, decimals)  == 1. ).all()
-        cond = [_xdel, _ydel] # _xcent, _ycent,
-        return all(cond), cond
 
 
     def get_grid(self, l):
