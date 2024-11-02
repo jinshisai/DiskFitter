@@ -760,6 +760,7 @@ class DiMO(object):#, FitThinModel):
             nwalkers = nwalkers, nrun = nrun, nburn = nburn, labels = labels,
             show_progress = show_progress, optimize_ini = optimize_ini, moves = moves,
             symmetric_error = symmetric_error, npool = npool, f_rand_init = f_rand_init)
+        self.pfit = BE.pfit
         self.popt = BE.pfit[0]
         self.perr = BE.pfit[1:]
 
@@ -792,7 +793,7 @@ class DiMO(object):#, FitThinModel):
         outtxtfile = outname + '_results.txt'
         dt = datetime.now()
         dtstr = dt.strftime('%Y-%m-%d %H:%M:%S')
-        ne, _ = self.popt.shape
+        ne, _ = self.pfit.shape
         labels = self.model_keys
         perr_indx = dict(zip(self.pfree_keys, 
             [*np.arange(0,len(self.pfree_keys))]))
@@ -827,7 +828,6 @@ class DiMO(object):#, FitThinModel):
                 f.write('# criterion')
                 for k in criterion.keys():
                     f.write('\n# %s %.4f'%(k, criterion[k]))
-        return modelcube
 
 
 def merge_dictionaries(dict1, dict2):
