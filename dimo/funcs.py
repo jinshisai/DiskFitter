@@ -56,7 +56,7 @@ def rotate2d(x, y, angle, deg=True, coords=False):
     return xrot, yrot
 
 
-def beam_convolution(xx, yy, image, beam):
+def beam_convolution(xx, yy, image, beam, beam_image = None):
     '''
     Perform beam convolution. The input image must be in 
     a unit of an arbitral intensity per pixel, and then the output image
@@ -66,20 +66,27 @@ def beam_convolution(xx, yy, image, beam):
     ----------
     xx, yy (array): 2D grid arrays.
     image (array): Input image in dimension of two to four.
-    beam (list): Beam that will be convolved. Should be given as [bmaj, bmin bpa].
+    beam (list): Observing beam. Must be given as [bmaj, bmin bpa]
+    beam_image (ndarry): 2D array of defined beam that will be convolved.
     '''
-    # grid
+    # grid info
     ny, nx = xx.shape
     dx = xx[0,1] - xx[0,0]
     dy = yy[1,0] - yy[0,0]
 
-    # define Gaussian beam
-    gaussbeam = gaussian2d(xx, yy, 1., 
-        xx[ny//2 - 1 + ny%2, nx//2 - 1 + nx%2],
-        yy[ny//2 - 1 + ny%2, nx//2 - 1 + nx%2],
-        beam[1] / 2.35, beam[0] / 2.35, beam[2], peak=True)
+    # beam to be convolved
+    if beam_image is None:
+        # define Gaussian beam
+        gaussbeam = gaussian2d(xx, yy, 1., 
+            xx[ny//2 - 1 + ny%2, nx//2 - 1 + nx%2],
+            yy[ny//2 - 1 + ny%2, nx//2 - 1 + nx%2],
+            beam[1] / 2.35, beam[0] / 2.35, beam[2], peak=True)
+        gaussbeam /= np.sum(gaussbeam)
+    else:
+        gaussbeam = beam_image.copy()
+
+    # dimension check
     ndim = len(image.shape)
-    gaussbeam /= np.sum(gaussbeam)
     if ndim == 2:
         pass
     elif ndim == 3:

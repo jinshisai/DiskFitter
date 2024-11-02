@@ -7,8 +7,7 @@ import matplotlib.pyplot as plt
 class Nested2DGrid(object):
     """docstring for NestedGrid"""
     def __init__(self, x, y,
-        xlim, ylim, nsub, 
-        nlevels = 1, reslim = 5,):
+        xlim, ylim, nsub, reslim = 5,):
         super(Nested2DGrid, self).__init__()
         # save axes of the mother grid
         self.x = x
@@ -28,6 +27,7 @@ class Nested2DGrid(object):
 
         # nested grid
         self.nsub = nsub
+        nlevels = 0 if nsub is None else len(nsub)
         self.nlevels = nlevels + 1
         # original 1D axes
         self.xaxes = [None] * (nlevels + 1)
@@ -75,11 +75,11 @@ class Nested2DGrid(object):
     def get_nestinglim(self, reslim = 5):
         xlim = []
         ylim = []
-        _dx, _dy = self.dx, self.dy
+        _dx, _dy = np.abs(self.dx), np.abs(self.dy)
         for l in range(self.nlevels - 1):
             xlim.append([-_dx * reslim, _dx * reslim])
             ylim.append([-_dy * reslim, _dy * reslim])
-            _dx, _dy = np.array([_dx, _dy]) / self.nsub[l]
+            _dx, _dy = np.abs(np.array([_dx, _dy])) / self.nsub[l]
 
         return xlim, ylim
 
@@ -380,12 +380,12 @@ class Nested3DGrid(object):
         xlim = []
         ylim = []
         zlim = []
-        _dx, _dy, _dz = self.dx, self.dy, self.dz
+        _dx, _dy, _dz = np.abs(self.dx), np.abs(self.dy), np.abs(self.dz)
         for l in range(self.nlevels - 1):
             xlim.append([-_dx * reslim, _dx * reslim])
             ylim.append([-_dy * reslim, _dy * reslim])
             zlim.append([-_dz * reslim, _dz * reslim])
-            _dx, _dy, _dz = np.array([_dx, _dy, _dz]) / self.nsub[l]
+            _dx, _dy, _dz = np.abs(np.array([_dx, _dy, _dz])) / self.nsub[l]
 
         return xlim, ylim, zlim
 
@@ -608,6 +608,20 @@ class Nested3DGrid(object):
             return 0
         return np.nanmean(d_avg, axis = 0)
 
+
+    def gridinfo(self, units = ['au', 'au', 'au']):
+        ux, uy, uz = units
+        print('Nesting level: %i'%self.nlevels)
+        print('Resolutions:')
+        for l in range(self.nlevels):
+            dx = self.xaxes[l][1] - self.xaxes[l][0]
+            dy = self.yaxes[l][1] - self.yaxes[l][0]
+            dz = self.zaxes[l][1] - self.zaxes[l][0]
+            print('   l=%i: (dx, dy, dz) = (%.2e %s, %.2e %s, %.2e %s)'%(l, dx, ux, dy, uy, dz, uz))
+            print('      : (xlim, ylim, zlim) = (%.2e to %.2e %s, %.2e to %.2e %s, %.2e to %.2e %s, )'%(
+                self.xlim[l][0], self.xlim[l][1], ux,
+                self.ylim[l][0], self.ylim[l][1], uy,
+                self.zlim[l][0], self.zlim[l][1], uz))
 
 
     def edgecut_indices(self, xlength, ylength):
