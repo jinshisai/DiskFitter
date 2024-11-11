@@ -161,6 +161,7 @@ class MultiLayerDisk(object):
         '''
         Transfer the plane of sky coordinates to disk local coordinates.
         '''
+        self.zoffset = [None] * self.grid.nlevels
         for l in range(self.grid.nlevels):
             xp = self.xs[l]
             yp = self.ys[l]
@@ -172,10 +173,12 @@ class MultiLayerDisk(object):
             if adoptive_zaxis & (np.abs(np.cos(self._inc_rad)) > cosi_lim):
                 # center origin of z axis in the disk midplane
                 zoffset = - np.tan(self._inc_rad) * y # zp_mid(xp, yp)
+                self.zoffset[l] = zoffset
                 _zp = zp + zoffset # shift z center
                 x, y, z = xrot(x, y, _zp, self._inc_rad) # rot = - (-inc)
             else:
                 x, y, z = xrot(x, y, zp, self._inc_rad) # rot = - (-inc)
+                self.zoffset[l] = np.zeros(x.size)
 
             self.xps[l] = x
             self.yps[l] = y
@@ -506,14 +509,16 @@ class MultiLayerDisk(object):
         x = self.grid.collapse(self.xps)
         y = self.grid.collapse(self.yps)
         z = self.grid.collapse(self.zps)
+        zoffset = self.grid.collapse(self.zoffset)
         nx, ny, nz = x.shape
         x, y, z = self.grid.xx, self.grid.yy, self.grid.zz
         nx, ny, nz = self.grid.nx, self.grid.ny, self.grid.nz
 
         y = y[nx//2, :, :]
-        x, y = rot2d(x[nx//2, :, :] - self.dx0, y - self.dy0, self._pa_rad - 0.5 * np.pi)
+        _x, _y = rot2d(x[nx//2, :, :] - self.dx0, y - self.dy0, self._pa_rad - 0.5 * np.pi)
         if self.adoptive_zaxis:
-            z = z[nx//2, :, :] - np.tan(self._inc_rad) * y # adoptive z
+            #z = z[nx//2, :, :] - np.tan(self._inc_rad) * _y # adoptive z
+            z = z[nx//2, :, :] + zoffset[nx//2, :, :]
         else:
             z = z[nx//2, :, :]
 
