@@ -329,7 +329,7 @@ class MultiLayerDisk(object):
         side = np.sign(np.cos(self._inc_rad)) # cos(-i) = cos(i)
 
 
-        '''old
+        #old
         # height of fore/rear layers
         z0f = zl * side
         z0r = - zl * side
@@ -348,9 +348,9 @@ class MultiLayerDisk(object):
             # negative z is fore side
             zout_f = np.where(z - z0f < 0.) # outer side
             zin_f = np.where( (z >= z0f) * (z < 0.)) # inner side
-        '''
 
-        #'''new
+
+        '''new
         # height of upper/lower layers
         z0u = zl # upper (positive-z) side
         z0l = - zl # lower (negative-z) side
@@ -361,7 +361,7 @@ class MultiLayerDisk(object):
         zin_r = np.where( (z >= z0l) * (z < 0.)) # inner side
         z0f = z0u
         z0r = z0l
-
+        '''
 
         # fore layer
         tau_rho_gf[zout_f] = self.puff_up_layer(tau_g[zout_f], z[zout_f], z0f[zout_f], h_out[zout_f])
@@ -409,7 +409,7 @@ class MultiLayerDisk(object):
             # get temperature and volume tau
             _T_g, _vlos, _tau_rho_gf, _tau_rho_gr, _dv = \
             self.build_gas_layer(self.Rs[l].copy(), 
-                self.ts[l].copy(), self.zs[l].copy(), mmol = mmol)
+                self.ts[l].copy(), self.zps[l].copy(), mmol = mmol)
             _T_d, _tau_d = self.build_dust_layer(self.Rmid[l])
             _vlos += self.vsys
             T_g[l] = _T_g
@@ -435,42 +435,6 @@ class MultiLayerDisk(object):
 
     def build_cube(self, Tcmb = 2.73, f0 = 230., dist = 140., mmol = None):
         T_g, vlos, tau_rho_gf, tau_rho_gr, T_d, tau_d, dv = self.build(mmol = mmol)
-        '''
-        # for each nested level
-        T_g = [None] * self.grid.nlevels
-        T_d = [None] * self.grid.nlevels
-        tau_rho_gf = [None] * self.grid.nlevels
-        tau_rho_gr = [None] * self.grid.nlevels
-        tau_d = [None] * self.grid.nlevels
-        vlos = [None] * self.grid.nlevels
-        dv = [None] * self.grid.nlevels
-
-        if any([i is None for i in self.xps]) | any([i is None for i in self.yps])\
-         | any([i is None for i in self.zps]):
-            self.deproject_grid()
-
-        for l in range(self.grid.nlevels):
-            # get temperature and volume tau
-            _T_g, _vlos, _tau_rho_gf, _tau_rho_gr, _dv = \
-            self.build_gas_layer(self.Rs[l].copy(), 
-                self.ts[l].copy(), self.zs[l].copy(), mmol = mmol)
-            _T_d, _tau_d = self.build_dust_layer(self.Rmid[l])
-            _vlos += self.vsys
-            T_g[l] = _T_g
-            vlos[l] = _vlos
-            tau_rho_gf[l] = _tau_rho_gf
-            tau_rho_gr[l] = _tau_rho_gr
-            T_d[l] = _T_d
-            tau_d[l] = _tau_d
-            dv[l] = _dv
-
-        T_g = self.grid.collapse(T_g)
-        vlos = self.grid.collapse(vlos)
-        tau_rho_gf = self.grid.collapse(tau_rho_gf)
-        tau_rho_gr = self.grid.collapse(tau_rho_gr)
-        T_d = self.grid2D.collapse(T_d)
-        tau_d = self.grid2D.collapse(tau_d)
-        '''
 
         # to cube
         if self.dv > 0.:
@@ -505,17 +469,15 @@ class MultiLayerDisk(object):
 
 
     def show_model_sideview(self):
-        #x, y, z = self.xps[0], self.yps[0], self.zps[0]
-        x = self.grid.collapse(self.xps)
-        y = self.grid.collapse(self.yps)
-        z = self.grid.collapse(self.zps)
+        #x = self.grid.collapse(self.xs)
+        #y = self.grid.collapse(self.ys)
+        #z = self.grid.collapse(self.zs)
         zoffset = self.grid.collapse(self.zoffset)
-        nx, ny, nz = x.shape
         x, y, z = self.grid.xx, self.grid.yy, self.grid.zz
         nx, ny, nz = self.grid.nx, self.grid.ny, self.grid.nz
 
         y = y[nx//2, :, :]
-        _x, _y = rot2d(x[nx//2, :, :] - self.dx0, y - self.dy0, self._pa_rad - 0.5 * np.pi)
+        #_x, _y = rot2d(x[nx//2, :, :] - self.dx0, y - self.dy0, self._pa_rad - 0.5 * np.pi)
         if self.adoptive_zaxis:
             #z = z[nx//2, :, :] - np.tan(self._inc_rad) * _y # adoptive z
             z = z[nx//2, :, :] + zoffset[nx//2, :, :]
@@ -533,7 +495,35 @@ class MultiLayerDisk(object):
         ymin, ymax = np.nanmin(y), np.nanmax(y)
         zmin, zmax = np.nanmin(z), np.nanmax(z)
         ax.set_ylim(ymin, ymax)
-        ax.set_xlim(zmax, zmin) # z axis
+        ax.set_xlim(zmin, zmax) # z axis
+        plt.show()
+
+
+    def show_model_diskview(self):
+        #x, y, z = self.xps[0], self.yps[0], self.zps[0]
+        x = self.grid.collapse(self.xps)
+        y = self.grid.collapse(self.yps)
+        z = self.grid.collapse(self.zps)
+        R = self.grid.collapse(self.Rs)
+        t = self.grid.collapse(self.ts)
+        nx, ny, nz = x.shape
+        x, y, z = self.grid.xx, self.grid.yy, self.grid.zz
+        nx, ny, nz = self.grid.nx, self.grid.ny, self.grid.nz
+
+        T_g, vlos, tau_rho_gf, tau_rho_gr, T_d, tau_d, dv = self.build()
+
+        tau_g = tau_rho_gf + tau_rho_gr
+
+        fig = plt.figure()
+        ax1 = fig.add_subplot(121)
+        ax2 = fig.add_subplot(122)
+
+        ax1.pcolormesh(x[:, :, nz//2], y[:, :, nz//2], tau_g[:, :, nz//2])
+        ax2.pcolormesh(R[:, ny//2, :], z[:, ny//2, :], tau_g[:, ny//2, :])
+        #ymin, ymax = np.nanmin(y), np.nanmax(y)
+        #zmin, zmax = np.nanmin(z), np.nanmax(z)
+        #ax.set_ylim(ymin, ymax)
+        #ax.set_xlim(zmax, zmin) # z axis
         plt.show()
 
 
