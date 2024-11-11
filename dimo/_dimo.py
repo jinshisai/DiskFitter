@@ -878,6 +878,8 @@ class DiMO(object):#, FitThinModel):
             else:
                 return exp
 
+        print('Rbeam_pix ', Rbeam_pix)
+
         # labels
         if len(labels) != len(params): labels = self.pfree_keys
 
@@ -931,6 +933,8 @@ class DiMO(object):#, FitThinModel):
             modelcube = model.build_cube(
                 Tcmb = Tcmb, f0 = f0, dist = dist, mmol = mmol)
             #print(np.nanmin(model.Rs[0]), np.nanmax(model.Rs[0]))
+            print('Tg %.f K, Mean resid %.2f'%(model.Tg0,
+                np.sqrt(np.nanmean((d_smpld - modelcube[:, smpl_y//2::smpl_y, smpl_x//2::smpl_x])**2.))/derr))
             return modelcube[:, smpl_y//2::smpl_y, smpl_x//2::smpl_x]
 
 
