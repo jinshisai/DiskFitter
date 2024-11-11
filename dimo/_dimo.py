@@ -901,6 +901,7 @@ class DiMO(object):#, FitThinModel):
         model.deproject_grid()
         #model.show_model_sideview()
 
+
         # define fitting function
         def fitfunc(x, y, z, v, *params):
             # safty net
@@ -931,7 +932,6 @@ class DiMO(object):#, FitThinModel):
                 Tcmb = Tcmb, f0 = f0, dist = dist, mmol = mmol)
             #print(np.nanmin(model.Rs[0]), np.nanmax(model.Rs[0]))
             return modelcube[:, smpl_y//2::smpl_y, smpl_x//2::smpl_x]
-
 
 
         # fitting

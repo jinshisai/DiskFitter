@@ -403,6 +403,7 @@ class MultiLayerDisk(object):
 
         if any([i is None for i in self.xps]) | any([i is None for i in self.yps])\
          | any([i is None for i in self.zps]):
+            print('deproject_grid')
             self.deproject_grid()
 
         for l in range(self.grid.nlevels):
