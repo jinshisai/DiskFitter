@@ -671,6 +671,8 @@ class DiMO(object):#, FitThinModel):
             else:
                 return exp
 
+        print('Rbeam_pix %.2f'%Rbeam_pix)
+
         # labels
         if len(labels) != len(params): labels = self.pfree_keys
 
@@ -729,6 +731,9 @@ class DiMO(object):#, FitThinModel):
                     self.x_nestlim.copy(), self.y_nestlim.copy(), 
                     self.z_nestlim.copy(), self.n_nest,
                     *self.build_args)
+
+                print('Tg %.f K, Mean resid %.2f'%(model.Tg0,
+                    np.sqrt(np.nanmean((d_smpld - modelcube[:, smpl_y//2::smpl_y, smpl_x//2::smpl_x])**2.))/derr))
                 return modelcube[:, smpl_y//2::smpl_y, smpl_x//2::smpl_x]
         else:
             xx, yy, zz = np.meshgrid(x, y, z, indexing = 'ij')
