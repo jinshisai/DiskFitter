@@ -31,6 +31,9 @@ hp     = constants.h.cgs.value # Planck constant [erg s]
 auTOcm = units.au.to('cm') # 1 au (cm)
 
 
+# Ignore divide-by-zero warning
+np.seterr(divide='ignore')
+
 
 # Fitters
 class FitThinModel(object):
@@ -574,8 +577,11 @@ class DiMO(object):#, FitThinModel):
         xscale = 0.5, yscale = 0.5, zscale = 0.5):
 
         # parameter checks
-        _model = model()
-        _model_keys = _model.get_paramkeys()
+        try:
+            _model = model()
+        except:
+            _model = model(np.arange(0,3,1),np.arange(0,3,1),np.arange(0,3,1),np.arange(0,3,1))
+        _model_keys = _model.param_keys.copy()
         _input_keys = list(params_free.keys()) + list(params_fixed.keys())
         if sorted(_model_keys) != sorted(_input_keys):
             print('ERROR\tModelFitter: input keys do not match model input parameters.')
@@ -641,7 +647,7 @@ class DiMO(object):#, FitThinModel):
         outname = 'modelfitter_results', nwalkers=None, 
         nrun=2000, nburn=1000, labels=[], show_progress=True, 
         optimize_ini=False, moves=emcee.moves.WalkMove(), symmetric_error=False,
-        npool = 1, f_rand_init = 0.1):
+        npool = 1, f_rand_init = 1.):
         # drop unecessary axis
         d = np.squeeze(d)
         # dimentions
@@ -760,7 +766,6 @@ class DiMO(object):#, FitThinModel):
             nwalkers = nwalkers, nrun = nrun, nburn = nburn, labels = labels,
             show_progress = show_progress, optimize_ini = optimize_ini, moves = moves,
             symmetric_error = symmetric_error, npool = npool, f_rand_init = f_rand_init)
-        self.pfit = BE.pfit
         self.popt = BE.pfit[0]
         self.perr = BE.pfit[1:]
 
@@ -781,7 +786,8 @@ class DiMO(object):#, FitThinModel):
 
 
 
-    def writeout_fitres(self, outname, criterion = None):
+    def writeout_fitres(self, outname, criterion = None,
+        credible_interval = 0.68):
         # best solution
         params_free = dict(zip(self.pfree_keys, [*self.popt]))
         _params_full = merge_dictionaries(params_free, self.params_fixed)
@@ -828,6 +834,127 @@ class DiMO(object):#, FitThinModel):
                 f.write('# criterion')
                 for k in criterion.keys():
                     f.write('\n# %s %.4f'%(k, criterion[k]))
+
+
+    # define fitting function
+    def fit_multilayer_model(self, params, pranges, d, derr, x, y, z, v,
+        Tcmb = 2.73, f0 = 230., dist = 140., mmol = None,
+        outname = 'modelfitter_results', nwalkers=None, 
+        nrun=2000, nburn=1000, labels=[], show_progress=True, 
+        optimize_ini=False, moves = emcee.moves.StretchMove(), 
+        symmetric_error=False, npool = 1, f_rand_init = 1., reslim = 10):
+        axes = [x, y, z, v]
+        # drop unecessary axis
+        d = np.squeeze(d)
+        # dimentions
+        nx, ny, nz = len(x), len(y), len(z)
+        # sampling step
+        delx = - (x[1] - x[0]) # au / self.dist # arcsec
+        dely = (y[1] - y[0]) # au / self.dist   # arcsec
+        if self.beam is not None:
+            if self.sampling:
+                smpl_x = int(self.beam[1] * 0.5 / delx)
+                smpl_y = int(self.beam[1] * 0.5 / dely)
+                d_smpld = d[:, smpl_y//2::smpl_y, smpl_x//2::smpl_x]
+                Rbeam_pix = 1.
+            else:
+                smpl_x, smpl_y = 1, 1
+                Rbeam_pix = np.pi/(4.*np.log(2.)) * self.beam[1] * self.beam[0] / delx / dely
+                d_smpld = d.copy()
+        else:
+            Rbeam_pix = 1.
+            smpl_x, smpl_y = 1, 1
+            d_smpld = d.copy()
+
+        # log likelihood
+        def lnlike(params, d, derr, fmodel, *x):
+            mdl = fmodel(*x, *params)
+
+            # Likelihood function (in log)
+            exp = -0.5 * np.nansum((d-mdl)**2/(derr*derr) 
+                + np.log(2.*np.pi*derr*derr)) / Rbeam_pix
+            if np.isnan(exp):
+                return -np.inf
+            else:
+                return exp
+
+        # labels
+        if len(labels) != len(params): labels = self.pfree_keys
+
+
+        # setup model
+        model = self.model(x, y, z, v,
+            xlim = None, ylim = None, zlim = None,
+            nsub = self.n_nest, reslim = reslim,
+            adoptive_zaxis = True, cosi_lim = 0.5, beam = self.beam,)
+        model.grid.gridinfo()
+
+        # renew grid every fit or not
+        if any([i in self.pfree_keys for i in ['dx0', 'dy0', 'inc', 'pa']]):
+            renew_grid = True
+        else:
+            print('Grid-saved mode')
+            renew_grid = False
+
+        # make grid
+        model.set_params(*self.params_ini)
+        model.deproject_grid()
+        #model.show_model_sideview()
+
+        # define fitting function
+        def fitfunc(x, y, z, v, *params):
+            # safty net
+            if np.all((pranges[0] < np.array([*params])) \
+                * (np.array([*params]) < pranges[1])) == False:
+                return np.zeros(
+                    (len(v), ny, nx)
+                    )[:, smpl_y//2::smpl_y, smpl_x//2::smpl_x]
+
+            # merge free parameters to fixed parameters
+            params_free = dict(zip(self.pfree_keys, [*params]))
+            _params_full = merge_dictionaries(params_free, self.params_fixed)
+            params_full = list(
+                {k: _params_full[k] for k in self.model_keys}.values()
+                ) # reordered elements
+
+            # update parameters
+            model.set_params(*params_full)
+            #print(_params_full)
+            #model.check_params()
+
+            # renew grid
+            if renew_grid:
+                model.deproject_grid()
+
+            # cube on the original grid
+            modelcube = model.build_cube(
+                Tcmb = Tcmb, f0 = f0, dist = dist, mmol = mmol)
+            #print(np.nanmin(model.Rs[0]), np.nanmax(model.Rs[0]))
+            return modelcube[:, smpl_y//2::smpl_y, smpl_x//2::smpl_x]
+
+
+
+        # fitting
+        p0 = list(self.params_free.values())
+        BE = BayesEstimator(axes, d_smpld, derr, fitfunc, lnlike = lnlike)
+        BE.run_mcmc(p0, pranges, outname=outname,
+            nwalkers = nwalkers, nrun = nrun, nburn = nburn, labels = labels,
+            show_progress = show_progress, optimize_ini = optimize_ini, moves = moves,
+            symmetric_error = symmetric_error, npool = npool, f_rand_init = f_rand_init)
+        self.pfit = BE.pfit.copy()
+        self.popt = BE.pfit[0]
+        self.perr = BE.pfit[1:]
+
+
+        # best solution
+        smpl_y, smpl_x = 1, 1
+        modelcube = fitfunc(x, y, z, v, *self.popt)
+        #modelcube = fitfunc(x, y, z, v, *list(self.params_free.values()))
+        self.modelcube = modelcube
+
+        self.writeout_fitres(outname, BE.criterion)
+
+        return modelcube
 
 
 def merge_dictionaries(dict1, dict2):
