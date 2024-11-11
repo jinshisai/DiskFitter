@@ -324,8 +324,8 @@ class MultiLayerDisk:
         xlim = None, ylim = None, zlim = None, nsub = [3],
         beam = None, dist = 140., Tcmb = 2.73, f0 = 230.,):
         # grid
-        nstg = Nested3DGrid(x, y, z, xlim, ylim, zlim, nsub, nlevels = len(nsub))
-        nstg2D = Nested2DGrid(x, y, xlim, ylim, nsub, nlevels = len(nsub))
+        nstg = Nested3DGrid(x, y, z, xlim, ylim, zlim, nsub)
+        nstg2D = Nested2DGrid(x, y, xlim, ylim, nsub,)
 
         # velocity grid
         nx, ny, nz = nstg.nx, nstg.ny, nstg.nz
