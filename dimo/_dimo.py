@@ -571,8 +571,8 @@ class DiMO(object):#, FitThinModel):
      params_fixed (dict): Fixed parameters
     """
     def __init__(self, model, params_free, params_fixed, 
-        beam = None, dist = 140., build_args = None, 
-        sampling = False, n_subgrid = 1,
+        beam = None, dist = 140., line = None, iline = None, dv_mode = 'total',
+        build_args = None, sampling = False, n_subgrid = 1,
         n_nest = None, x_nestlim = None, y_nestlim = None, z_nestlim = None,
         xscale = 0.5, yscale = 0.5, zscale = 0.5):
 
@@ -609,6 +609,8 @@ class DiMO(object):#, FitThinModel):
         self.n_nest = n_nest
         self.x_nestlim, self.y_nestlim, self.z_nestlim = x_nestlim, y_nestlim, z_nestlim
         self.xscale, self.yscale = xscale, yscale
+        self.line = line
+        self.iline = iline
 
 
     def fit_cube(self, params: dict, pranges:list, 
@@ -842,8 +844,9 @@ class DiMO(object):#, FitThinModel):
 
 
     # define fitting function
-    def fit_multilayer_model(self, params, pranges, d, derr, x, y, z, v,
-        Tcmb = 2.73, f0 = 230., dist = 140., mmol = None,
+    def fit_multilayer_model(self, params, pranges, 
+        d, derr, x, y, z, v,
+        Tcmb = 2.73, f0 = 230., dv_mode = 'total',
         outname = 'modelfitter_results', nwalkers=None, 
         nrun=2000, nburn=1000, labels=[], show_progress=True, 
         optimize_ini=False, moves = emcee.moves.StretchMove(), 
@@ -883,7 +886,6 @@ class DiMO(object):#, FitThinModel):
             else:
                 return exp
 
-        print('Rbeam_pix ', Rbeam_pix)
 
         # labels
         if len(labels) != len(params): labels = self.pfree_keys
@@ -893,6 +895,7 @@ class DiMO(object):#, FitThinModel):
         model = self.model(x, y, z, v,
             xlim = None, ylim = None, zlim = None,
             nsub = self.n_nest, reslim = reslim,
+            line = self.line, iline = self.iline,
             adoptive_zaxis = True, cosi_lim = 0.5, beam = self.beam,)
         model.grid.gridinfo()
 
@@ -936,10 +939,7 @@ class DiMO(object):#, FitThinModel):
 
             # cube on the original grid
             modelcube = model.build_cube(
-                Tcmb = Tcmb, f0 = f0, dist = dist, mmol = mmol)
-            #print(np.nanmin(model.Rs[0]), np.nanmax(model.Rs[0]))
-            print('Tg %.f K, Mean resid %.2f'%(model.Tg0,
-                np.sqrt(np.nanmean((d_smpld - modelcube[:, smpl_y//2::smpl_y, smpl_x//2::smpl_x])**2.))/derr))
+                Tcmb = Tcmb, f0 = f0, dist = self.dist, dv_mode = dv_mode)
             return modelcube[:, smpl_y//2::smpl_y, smpl_x//2::smpl_x]
 
 
@@ -981,6 +981,7 @@ def mathlabels(pylabels):
     'gamma_d': r'$\gamma_\mathrm{d}$',
     'Tg0': r'$T_{\mathrm{g},0}$',
     'qg': r'$q_\mathrm{g}$',
+    'log_N_gc': r'$\log N_\mathrm{c,g}$',
     'log_tau_gc': r'$\log \tau_\mathrm{c,g}$',
     'rc_g': r'$R_\mathrm{c,g}$',
     'gamma_g': r'$\gamma_\mathrm{g}$',

@@ -3,7 +3,9 @@ import os
 import sys
 import math
 import glob
+import pandas as pd
 import numpy as np
+import time
 from astropy import constants, units
 
 # constants (in cgs)
@@ -22,14 +24,18 @@ mp     = constants.m_p.cgs.value      # Proton mass (g)
 
 # path to here
 path_to_here = os.path.dirname(__file__)
-path_to_library = path_to_here[:-11]
+path_to_library = path_to_here + '/'
+
+
+# Ignore divide-by-zero warning
+np.seterr(divide='ignore')
 
 
 
 class MolData():
 
 
-    def __init(self, line):
+    def __init__(self, line):
         self.line = line
         self.read_lamda_moldata()
 
@@ -107,7 +113,7 @@ class MolData():
 
     def params_ul(self, Ju):
         # line Ju --> Jl
-        trans = self.trans[Ju]
+        trans = self.trans[Ju-1]
         freq = self.freq[Ju-1] * 1e9 # Hz
         Aul     = self.Acoeff[Ju-1]
         gu      = self.gJ[Ju]
@@ -117,7 +123,7 @@ class MolData():
         return trans, freq, Aul, gu, gl, Eu, El
 
 
-    def partfunc_grid(self, Tmin, Tmax, ngrid, scale = 'linear'):
+    def partition_grid(self, Tmin, Tmax, ngrid, scale = 'linear'):
         '''
         Make a grid for the partition function.
 
@@ -149,10 +155,10 @@ class MolData():
 
 
 
-def Molecule():
+class Molecule():
 
 
-    def __init(self, molecules):
+    def __init__(self, molecules):
         self.moldata = {}
 
         if (type(molecules) == list) or (type(molecules) == tuple):
@@ -181,18 +187,31 @@ def Molecule():
 
         # partition function
         if grid_approx:
-            # currently 0th order approx. only
-            Qrot = self.moldata[line]._PFgrid[np.nanargmin(
-                (self.moldata[line]._Tgrid - Tex)**2.)]
+            if type(Tex) == np.ndarray:
+                #start = time.time()
+                # Perform linear interpolation
+                Qrot = np.interp(Tex.ravel(),
+                    self.moldata[line]._Tgrid, self.moldata[line]._PFgrid)
+                Qrot = Qrot.reshape(Tex.shape)
+                #end = time.time()
+                #print('PF takes %13.2e s'%(end-start))
+            else:
+                # currently 0th order approx. only
+                Qrot = self.moldata[line]._PFgrid[np.nanargmin(
+                    (self.moldata[line]._Tgrid - Tex)**2.)]
         else:
             Qrot = self.moldata[line].partition_function(Tex)
 
         if delv is not None:
             # return tau_v
-            return (clight*clight*clight)/(8.*np.pi*freq_ul*freq_ul*freq_ul)*(gu/Qrot)\
-            *np.exp(-Eu/Tex)*Ntot*Aul*(np.exp(hp*freq_ul/(kb*Tex)) - 1.) / delv
+            return (clight*clight*clight)/(8.*np.pi*freq*freq*freq)*(gu/Qrot)\
+            *np.exp(-Eu/Tex)*Ntot*Aul*(np.exp(hp*freq/(kb*Tex)) - 1.) / delv
         else:
             # return tau_total, integrated over frequency
-            return (clight*clight)/(8.*np.pi*freq_ul*freq_ul)*(gu/Qrot)\
-            *np.exp(-Eu/Tex)*Ntot*Aul*(np.exp(hp*freq_ul/(kb*Tex)) - 1.)
+            return (clight*clight)/(8.*np.pi*freq*freq)*(gu/Qrot)\
+            *np.exp(-Eu/Tex)*Ntot*Aul*(np.exp(hp*freq/(kb*Tex)) - 1.)
+
+
+def McDowell_partition_function(T, B0):
+    return kb * T / hp / B0 * np.exp(hp * B0 / 3. / kb / T)
 
