@@ -32,6 +32,7 @@ auTOcm = units.au.to('cm') # 1 au (cm)
 # Ignore divide-by-zero warning
 np.seterr(divide='ignore')
 
+
 class MultiLayerDisk(object):
     '''
     A disk model with Two Thick Layers (TTL) with a thin dust layer.
@@ -403,7 +404,6 @@ class MultiLayerDisk(object):
 
         if any([i is None for i in self.xps]) | any([i is None for i in self.yps])\
          | any([i is None for i in self.zps]):
-            print('deproject_grid')
             self.deproject_grid()
 
         for l in range(self.grid.nlevels):
@@ -463,8 +463,10 @@ class MultiLayerDisk(object):
 
         # Convolve beam if given
         if self.beam is not None:
-            Iv = beam_convolution(self.grid2D.xx, self.grid2D.yy, Iv, 
+            Iv = beam_convolution(self.grid2D.xx.copy(), self.grid2D.yy.copy(), Iv, 
                 self.beam, self.gaussbeam)
+
+        print(np.nanmax(self.grid2D.xx))
 
         return Iv
 
