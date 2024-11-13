@@ -15,6 +15,8 @@ from .grid import Nested2DGrid, SubGrid2D
 from .mpe import BayesEstimator
 
 
+np.random.seed(42)
+
 
 ### constants
 Ggrav  = constants.G.cgs.value        # Gravitational constant
@@ -940,6 +942,13 @@ class DiMO(object):#, FitThinModel):
             # cube on the original grid
             modelcube = model.build_cube(
                 Tcmb = Tcmb, f0 = f0, dist = self.dist, dv_mode = dv_mode)
+
+            # debug
+            #print('Iv,max out: %13.2e'%(np.nanmax(modelcube)))
+            #print('Iv,data: %13.2e'%(np.nanmax(d_smpld)))
+            #print(np.sqrt(np.nanmean(d_smpld**2.)/derr**2.))
+            #print(np.sqrt(np.nanmean((modelcube[:, smpl_y//2::smpl_y, smpl_x//2::smpl_x] - d_smpld)**2.)/derr**2.))
+
             return modelcube[:, smpl_y//2::smpl_y, smpl_x//2::smpl_x]
 
 

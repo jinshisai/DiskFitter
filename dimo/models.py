@@ -462,15 +462,17 @@ class MultiLayerDisk(object):
         if self.dv > 0.:
             #dv = self.grid.collapse(dv)
             Tv_gf, Tv_gr, N_v_gf, N_v_gr = np.transpose(
-            ttldisk.Tndv_to_cube(T_g, n_gf, n_gr, vlos, dv, self.ve, self.grid.dz),
+            Tndv_to_cube(T_g, n_gf, n_gr, vlos, dv, self.ve, self.grid.dz),
             (0,3,2,1)) # np.transpose(Tt_cube, (0,1,3,2))
         else:
             Tv_gf, Tv_gr, N_v_gf, N_v_gr = np.transpose(
-            ttldisk.Tt_to_cube(T_g, n_gf, n_gr, vlos, self.ve, self.grid.dz),
+            Tt_to_cube(T_g, n_gf, n_gr, vlos, self.ve, self.grid.dz),
             (0,1,3,2,))
             #print(np.nanmax(Tv_gf))
 
         # density to tau
+        #print('Tv_gf max, q: %13.2e, %.2f'%(np.nanmax(Tv_gf), self.qg))
+        #print('N_v_gf max: %13.2e'%(np.nanmax(N_v_gf)))
         if (self.line is not None) * (self.iline is not None):
             tau_v_gf = self.mol.get_tau(self.line, self.iline, 
                 N_v_gf, Tv_gf, delv = None, grid_approx = True)
@@ -480,6 +482,7 @@ class MultiLayerDisk(object):
             # ignore temperature effect on conversion from column density to tau
             tau_v_gf = N_v_gf
             tau_v_gr = N_v_gr
+        #print('tau_v_gf max: %13.2e'%(np.nanmax(tau_v_gf)))
 
         # radiative transfer
         _Bv = lambda T, v: Bvppx(T, v, self.grid.dx, self.grid.dy, 
@@ -493,10 +496,12 @@ class MultiLayerDisk(object):
             tau_v_gf, tau_v_gr, tau_d, _Bv_cmb, self.nv)
 
         # Convolve beam if given
+        #print('I_v_nobeam max: %13.2e'%(np.nanmax(Iv)))
         if self.beam is not None:
             Iv = beam_convolution(self.grid2D.xx.copy(), self.grid2D.yy.copy(), Iv, 
                 self.beam, self.gaussbeam)
 
+        #print('I_v max: %13.2e'%(np.nanmax(Iv)))
         return Iv
 
 
