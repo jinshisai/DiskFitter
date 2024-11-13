@@ -45,7 +45,7 @@ class MultiLayerDisk(object):
         nsub: list | None = None, reslim: float = 10,
         adoptive_zaxis: bool = True, cosi_lim: float = 0.5, 
         beam: list | None = None, line: str | None = None, iline: int | None = None,
-        Tmin: float = 10., Tmax: float = 1000., nTex: int = 4096,
+        Tmin: float = 1., Tmax: float = 2000., nTex: int = 4096,
         Td0: float = 400., qd: float = 0.5, log_tau_dc: float = 0., 
         rc_d: float = 100., gamma_d: float = 1., 
         Tg0: float = 400., qg: float = 0.5, log_N_gc: float = 0., 
@@ -283,6 +283,15 @@ class MultiLayerDisk(object):
         self._inc_rad = np.radians(self.inc)
 
 
+    def __copy__(self):
+        obj = type(self).__new__(self.__class__)
+        obj.__dict__.update(self.__dict__)
+        return obj
+
+    def copy(self):
+        return self.__copy__()
+
+
     def check_params(self):
         print ({'Td0': self.Td0, 'qd': self.qd, 'log_tau_dc': self.log_tau_dc, 
             'rc_d': self.rc_d, 'gamma_d': self.gamma_d, 'Tg0': self.Tg0, 'qg': self.qg, 
@@ -430,7 +439,7 @@ class MultiLayerDisk(object):
             _T_g, _vlos, _n_gf, _n_gr, _dv = \
             self.build_gas_layer(self.Rs[l].copy(), 
                 self.ts[l].copy(), self.zps[l].copy(), dv_mode = dv_mode)
-            _T_d, _tau_d = self.build_dust_layer(self.Rmid[l])
+            _T_d, _tau_d = self.build_dust_layer(self.Rmid[l].copy())
             _vlos += self.vsys
             T_g[l] = _T_g
             vlos[l] = _vlos
@@ -468,7 +477,9 @@ class MultiLayerDisk(object):
             Tv_gf, Tv_gr, N_v_gf, N_v_gr = np.transpose(
             Tt_to_cube(T_g, n_gf, n_gr, vlos, self.ve, self.grid.dz),
             (0,1,3,2,))
-            #print(np.nanmax(Tv_gf))
+
+        Tv_gf = Tv_gf.clip(1., None) # safety net to avoid zero division
+        Tv_gr = Tv_gr.clip(1., None)
 
         # density to tau
         #print('Tv_gf max, q: %13.2e, %.2f'%(np.nanmax(Tv_gf), self.qg))

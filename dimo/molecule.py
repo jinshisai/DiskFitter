@@ -202,6 +202,11 @@ class Molecule():
         else:
             Qrot = self.moldata[line].partition_function(Tex)
 
+        # debug
+        #print('Qrot,min Qrot,max: %13.3e %13.3e'%(np.nanmin(Qrot), np.nanmax(Qrot)))
+        #print('gu Eu freq: %.2f %.2f %.2f'%(gu, Eu, freq*1e-9))
+        #print('Tex,min: %.2f'%(np.nanmin(Tex)))
+
         if delv is not None:
             # return tau_v
             return (clight*clight*clight)/(8.*np.pi*freq*freq*freq)*(gu/Qrot)\

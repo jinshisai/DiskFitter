@@ -883,6 +883,11 @@ class DiMO(object):#, FitThinModel):
             # Likelihood function (in log)
             exp = -0.5 * np.nansum((d-mdl)**2/(derr*derr) 
                 + np.log(2.*np.pi*derr*derr)) / Rbeam_pix
+
+            #print(np.isfinite(exp))
+            #print('Mean: %13.3e'%(np.sqrt(np.nanmean((mdl - d)**2.)/derr**2.)))
+            #print('ideal: %13.3e'%(-0.5 * np.nansum((d-d)**2/(derr*derr) + np.log(2.*np.pi*derr*derr)) / Rbeam_pix))
+            #print('lnlike: %13.3e'%(exp))
             if np.isnan(exp):
                 return -np.inf
             else:
@@ -923,24 +928,30 @@ class DiMO(object):#, FitThinModel):
                     (len(v), ny, nx)
                     )[:, smpl_y//2::smpl_y, smpl_x//2::smpl_x]
 
+
             # merge free parameters to fixed parameters
             params_free = dict(zip(self.pfree_keys, [*params]))
+            #print('p input')
+            #print(params_free)
             _params_full = merge_dictionaries(params_free, self.params_fixed)
             params_full = list(
                 {k: _params_full[k] for k in self.model_keys}.values()
                 ) # reordered elements
 
             # update parameters
-            model.set_params(*params_full)
+            _model = model.copy() # to make sure parallel calculations go well
+            _model.set_params(*params_full)
+            #model.set_params(*self.params_ini)
+            #print('p in model')
             #print(_params_full)
             #model.check_params()
 
             # renew grid
             if renew_grid:
-                model.deproject_grid()
+                _model.deproject_grid()
 
             # cube on the original grid
-            modelcube = model.build_cube(
+            modelcube = _model.build_cube(
                 Tcmb = Tcmb, f0 = f0, dist = self.dist, dv_mode = dv_mode)
 
             # debug
