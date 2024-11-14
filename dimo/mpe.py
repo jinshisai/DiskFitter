@@ -13,11 +13,11 @@ import numpy as np
 from datetime import datetime
 import matplotlib.pyplot as plt
 import scipy.optimize as op
+from scipy.stats import gaussian_kde
 import emcee
 import corner
 from typing import Callable
 from multiprocessing.dummy import Pool
-#from mpipool import MPIPool
 import gc
 
 from .funcs import gauss1d
@@ -47,6 +47,24 @@ def gauss_lnlike(params, d, derr, fmodel, *x):
 #def lnprob(params, pranges, d, derr, fmodel, *x):
 #    # According to Bayes' theorem
 #    return  lnprior(params, pranges) + lnlike(params, d, derr, fmodel, *x)
+
+
+def sample_mode(samples, ngrid = 1000):
+    ns, ndim = samples.shape
+
+    modes = []
+    for i in range(ndim):
+        _samples = samples[:,i]
+        kde = gaussian_kde(_samples)
+        x = np.linspace(min(_samples), max(_samples), ngrid)
+        mode = x[np.argmax(kde(x))]
+        modes.append(mode)
+
+        # for check
+        #print('mode %.2f'%mode)
+        #print('median %.2f'%np.median(_samples))
+
+    return modes
 
 
 ### Python class for model fitting
@@ -90,7 +108,7 @@ class BayesEstimator():
         nwalkers=None, nrun=5000, nburn=500, labels=[], show_progress=True,
         f_rand_init=0.1, credible_interval=0.68, show_results=True,
         optimize_ini=True, moves=emcee.moves.StretchMove(), symmetric_error=False,
-        npool=1, errtype='gauss', savefig = True, savesampler = True):
+        npool=1, errtype='gauss', savefig = True, savesampler = True,):
         '''
         A wrapper to run MCMC with emcee.
 
