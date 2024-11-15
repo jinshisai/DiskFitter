@@ -80,7 +80,7 @@ class MultiLayerDisk(object):
 
         # velocity
         self.nv = len(v)
-        self.delv = np.mean(v[1:] - v[:-1])
+        self.delv = np.mean(v[1:] - v[:-1]) # km / s
         self.ve = np.hstack([v - self.delv * 0.5, v[-1] + 0.5 * self.delv])
 
         # line
@@ -486,9 +486,9 @@ class MultiLayerDisk(object):
         #print('N_v_gf max: %13.2e'%(np.nanmax(N_v_gf)))
         if (self.line is not None) * (self.iline is not None):
             tau_v_gf = self.mol.get_tau(self.line, self.iline, 
-                N_v_gf, Tv_gf, delv = None, grid_approx = True)
+                N_v_gf, Tv_gf, delv = self.delv * 1.e5, grid_approx = True)
             tau_v_gr = self.mol.get_tau(self.line, self.iline, 
-                N_v_gr, Tv_gr, delv = None, grid_approx = True)
+                N_v_gr, Tv_gr, delv = self.delv * 1.e5, grid_approx = True)
         else:
             # ignore temperature effect on conversion from column density to tau
             tau_v_gf = N_v_gf
