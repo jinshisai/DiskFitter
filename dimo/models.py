@@ -456,7 +456,7 @@ class MultiLayerDisk(object):
         T_d = self.grid2D.collapse(T_d)
         tau_d = self.grid2D.collapse(tau_d)
 
-        if self.dv > 0.:
+        if (self.dv > 0.) | (dv_mode == 'thermal'):
             dv = self.grid.collapse(dv)
 
         return T_g, vlos, n_gf, n_gr, T_d, tau_d, dv
@@ -468,7 +468,7 @@ class MultiLayerDisk(object):
         # To cube
         #  calculate column density and density-weighted temperature 
         #  of each gas layer at every velocity channel.
-        if self.dv > 0.:
+        if (self.dv > 0.) | (dv_mode == 'thermal'):
             #dv = self.grid.collapse(dv)
             Tv_gf, Tv_gr, N_v_gf, N_v_gr = np.transpose(
             Tndv_to_cube(T_g, n_gf, n_gr, vlos, dv, self.ve, self.grid.dz),
