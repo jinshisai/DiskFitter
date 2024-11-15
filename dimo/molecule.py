@@ -111,15 +111,18 @@ class MolData():
         self.dE = dE
 
 
-    def params_ul(self, Ju):
+    def params_trans(self, iline):
         # line Ju --> Jl
-        trans = self.trans[Ju-1]
-        freq = self.freq[Ju-1] * 1e9 # Hz
-        Aul     = self.Acoeff[Ju-1]
-        gu      = self.gJ[Ju]
-        gl      = self.gJ[Ju-1]
-        Eu     = self.EJ[Ju]
-        El     = self.EJ[Ju-1]
+        Ju = self.Jup[iline-1]
+        Jl = self.Jlow[iline-1]
+
+        trans = self.trans[iline-1]
+        freq = self.freq[iline-1] * 1e9 # Hz
+        Aul     = self.Acoeff[iline-1]
+        gu      = self.gJ[Ju-1]
+        gl      = self.gJ[Jl-1]
+        Eu     = self.EJ[Ju-1]
+        El     = self.EJ[Jl-1]
         return trans, freq, Aul, gu, gl, Eu, El
 
 
@@ -170,7 +173,7 @@ class Molecule():
             print('ERROR\tLTEAnalysis: molecules must be str, or list or tuple of strings.')
 
 
-    def get_tau(self, line, Ju, Ntot, Tex, delv = None, grid_approx = True):
+    def get_tau(self, line, iline, Ntot, Tex, delv = None, grid_approx = True):
         '''
         Calculate the optical depth under the local thermal equilibrium (LTE) assumption.
 
@@ -183,7 +186,9 @@ class Molecule():
          delv (float): Line width (FWHM) of the line (cm s^-1). If given, tau_v will be calculated,
                        else tau_total integrated over frequency will be returned.
         '''
-        trans, freq, Aul, gu, gl, Eu, El = self.moldata[line].params_ul(Ju)
+        #Ju = self.moldata[line].Jup[iline]
+        #Jl = self.moldata[line].Jlow[iline]
+        trans, freq, Aul, gu, gl, Eu, El = self.moldata[line].params_trans(iline)
 
         # partition function
         if grid_approx:
