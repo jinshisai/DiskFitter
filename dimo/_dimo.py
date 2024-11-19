@@ -406,6 +406,7 @@ class FitThinModel(object):
             nwalkers = nwalkers, nrun = nrun, nburn = nburn, labels = labels,
             show_progress = show_progress, optimize_ini = optimize_ini, moves = moves,
             symmetric_error = symmetric_error, npool = npool, f_rand_init=0.1)
+        self.pfit = BE.pfit
         self.popt = BE.pfit[0]
         self.perr = BE.pfit[1:]
 

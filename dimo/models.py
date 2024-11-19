@@ -462,7 +462,8 @@ class MultiLayerDisk(object):
         return T_g, vlos, n_gf, n_gr, T_d, tau_d, dv
 
 
-    def build_cube(self, Tcmb = 2.73, f0 = 230., dist = 140., dv_mode = 'total'):
+    def build_cube(self, Tcmb = 2.73, f0 = 230., 
+        dist = 140., dv_mode = 'total', contsub = True):
         T_g, vlos, n_gf, n_gr, T_d, tau_d, dv = self.build(dv_mode = dv_mode)
 
         # To cube
@@ -505,6 +506,11 @@ class MultiLayerDisk(object):
         _Bv_d   = _Bv(T_d, f0)
         Iv = solve_MLRT(_Bv_gf, _Bv_gr, _Bv_d, 
             tau_v_gf, tau_v_gr, tau_d, _Bv_cmb, self.nv)
+
+        if contsub == False:
+            Iv_d = (_Bv_d - _Bv_cmb) * (1. - np.exp(- tau_d))
+            Iv_d = np.tile(Iv_d, (self.nv,1,1,))
+            Iv += Iv_d # add continuum back
 
         # Convolve beam if given
         #print('I_v_nobeam max: %13.2e'%(np.nanmax(Iv)))
