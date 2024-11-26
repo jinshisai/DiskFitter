@@ -11,8 +11,9 @@ import time
 
 from .funcs import beam_convolution, gaussian2d, glnprof_conv
 from .grid import Nested3DGrid, Nested2DGrid, Nested1DGrid, SubGrid2D
-from .linecube import tocube, solve_3LRT, waverage_to_cube, integrate_to_cube, solve_box3LRT
-from .libcube import ttldisk
+#from .linecube import tocube, solve_3LRT, waverage_to_cube, integrate_to_cube, solve_box3LRT
+from .libcube.linecube import solve_MLRT, Tndv_to_cube, Tt_to_cube
+from .molecule import Molecule
 
 
 ### constants
@@ -42,10 +43,12 @@ class MultiLayerDisk(object):
     def __init__(self, x, y, z, v,
         xlim: list | None = None, ylim: list | None = None, zlim: list | None = None,
         nsub: list | None = None, reslim: float = 10,
-        adoptive_zaxis = True, cosi_lim = 0.5, beam = None,
+        adoptive_zaxis: bool = True, cosi_lim: float = 0.5, 
+        beam: list | None = None, line: str | None = None, iline: int | None = None,
+        Tmin: float = 1., Tmax: float = 2000., nTex: int = 4096,
         Td0: float = 400., qd: float = 0.5, log_tau_dc: float = 0., 
         rc_d: float = 100., gamma_d: float = 1., 
-        Tg0: float = 400., qg: float = 0.5, log_tau_gc: float = 0., 
+        Tg0: float = 400., qg: float = 0.5, log_N_gc: float = 0., 
         rc_g: float = 100., gamma_g: float = 1., 
         z0: float = 0., pz: float = 1.25, h0: float = 0., ph: float = 0., 
         inc: float = 0., pa: float = 0., ms: float = 1., vsys: float = 0, 
@@ -77,8 +80,16 @@ class MultiLayerDisk(object):
 
         # velocity
         self.nv = len(v)
-        self.delv = np.mean(v[1:] - v[:-1])
+        self.delv = np.mean(v[1:] - v[:-1]) # km / s
         self.ve = np.hstack([v - self.delv * 0.5, v[-1] + 0.5 * self.delv])
+
+        # line
+        self.line = line
+        self.iline = iline
+        if (line is not None) * (iline is not None):
+            self.mol = Molecule(line)
+            self.mol.moldata[line].partition_grid(Tmin, Tmax, nTex, scale = 'linear')
+            self.mmol = self.mol.moldata[line].weight
 
         # initialize parameters
         # dust layer
@@ -90,7 +101,7 @@ class MultiLayerDisk(object):
         # gas layer
         self.Tg0 = Tg0 # gas temperature
         self.qg = qg
-        self.log_tau_gc = log_tau_gc
+        self.log_N_gc = log_N_gc
         self.rc_g = rc_g
         self.gamma_g = gamma_g
         self.z0 = z0
@@ -113,7 +124,7 @@ class MultiLayerDisk(object):
         self.pdv = pdv
 
         self.param_keys = ['Td0', 'qd', 'log_tau_dc', 'rc_d', 'gamma_d', 'Tg0', 'qg',
-        'log_tau_gc', 'rc_g', 'gamma_g', 'z0', 'pz', 'h0', 'ph', 'inc', 'pa', 'ms', 'vsys',
+        'log_N_gc', 'rc_g', 'gamma_g', 'z0', 'pz', 'h0', 'ph', 'inc', 'pa', 'ms', 'vsys',
         'dx0', 'dy0', 'r0', 'dv', 'pdv']
 
         # angle in radians
@@ -148,7 +159,7 @@ class MultiLayerDisk(object):
         self.beam = beam
         # define Gaussian beam
         nx, ny = self.grid2D.nx, self.grid2D.ny
-        gaussbeam = gaussian2d(self.grid2D.xx, self.grid2D.yy, 1., 
+        gaussbeam = gaussian2d(self.grid2D.xx.copy(), self.grid2D.yy.copy(), 1., 
             self.grid2D.xx[ny//2 - 1 + ny%2, nx//2 - 1 + nx%2],
         self.grid2D.yy[ny//2 - 1 + ny%2, nx//2 - 1 + nx%2],
         beam[1] / 2.35, beam[0] / 2.35, beam[2], peak=True)
@@ -200,7 +211,7 @@ class MultiLayerDisk(object):
 
     def set_params(self, 
         Td0 = 400., qd = 0.5, log_tau_dc = 0., rc_d = 100., gamma_d = 1., 
-        Tg0 = 400., qg = 0.5, log_tau_gc = 0., rc_g = 100., gamma_g = 1., 
+        Tg0 = 400., qg = 0.5, log_N_gc = 0., rc_g = 100., gamma_g = 1., 
         z0 = 0., pz = 1.25, h0 = 0., ph = 0., inc = 0., pa = 0., ms = 1., vsys = 0, 
         dx0 = 0., dy0 = 0., r0 = 1., dv = 0., pdv = 0.25):
         '''
@@ -209,12 +220,12 @@ class MultiLayerDisk(object):
         ----------
          Td0 (float): Temperature of dust layer at r0 (K).
          qd: (float): Power-law index for dust temperature profile.
-         log_tau_dc (float): Logarithm of optical depth of dust layer at r0.
+         log_tau_dc (float): Logarithm of optical depth of dust layer at rc.
          rc_d (float): Charactaristic radius of dust layer (au).
          gamma_d (float): Power-law index gamma of viscous disk for dust layer.
          Tg0 (float): Temperature of gas layers at r0 (K).
          qg (float): Power-law index for gas temperature profile.
-         log_tau_gc (float): Logarithm of optical depth of gas layers at r0.
+         log_N_gc (float): Logarithm of number surface density of gas layers at rc.
          rc_g (float): Charactaristic radius of gas layers (au).
          gamma_g (float): Power-law index gamma of viscous disk for gas layers.
          z0 (float): Height of gas layers at r0 (au).
@@ -245,7 +256,7 @@ class MultiLayerDisk(object):
         # gas layer
         self.Tg0 = Tg0 # gas temperature
         self.qg = qg
-        self.log_tau_gc = log_tau_gc
+        self.log_N_gc = log_N_gc
         self.rc_g = rc_g
         self.gamma_g = gamma_g
         self.z0 = z0
@@ -272,10 +283,19 @@ class MultiLayerDisk(object):
         self._inc_rad = np.radians(self.inc)
 
 
+    def __copy__(self):
+        obj = type(self).__new__(self.__class__)
+        obj.__dict__.update(self.__dict__)
+        return obj
+
+    def copy(self):
+        return self.__copy__()
+
+
     def check_params(self):
         print ({'Td0': self.Td0, 'qd': self.qd, 'log_tau_dc': self.log_tau_dc, 
             'rc_d': self.rc_d, 'gamma_d': self.gamma_d, 'Tg0': self.Tg0, 'qg': self.qg, 
-             'log_tau_gc': self.log_tau_gc, 'rc_g': self.rc_g, 'gamma_g': self.gamma_g,
+             'log_N_gc': self.log_N_gc, 'rc_g': self.rc_g, 'gamma_g': self.gamma_g,
              'z0': self.z0, 'pz': self.pz, 'h0': self.h0, 'ph': self.ph, 'inc': self.inc, 
              'pa': self.pa, 'ms': self.ms, 'vsys': self.vsys, 'dx0': self.dx0, 'dy0': self.dy0, 
              'r0': self.r0, 'dv': self.dv, 'pdv': self.pdv})
@@ -303,7 +323,7 @@ class MultiLayerDisk(object):
         return sig * np.exp( - (z - z0)**2. / (2.*H*H)) / np.sqrt(2. * np.pi) / H
 
 
-    def build_gas_layer(self, R, theta, z, rin = 0.1, mmol = None):
+    def build_gas_layer(self, R, theta, z, rin = 0.1, dv_mode = 'total'):
         # line of sight velocity
         # take z-axis as the line of sight
         # take x-axis to be major axis of the disk
@@ -312,8 +332,8 @@ class MultiLayerDisk(object):
         vlos[R < rin] = 0.
 
         # temperature and tau
-        T_g, tau_g = self.get_Tt(R, self.Tg0, self.qg,
-            10.**self.log_tau_gc, self.rc_g, self.gamma_g,)
+        T_g, N_g = self.get_Tt(R, self.Tg0, self.qg,
+            10.**self.log_N_gc, self.rc_g, self.gamma_g,)
 
         # puff up layers
         # layer height
@@ -322,15 +342,14 @@ class MultiLayerDisk(object):
         h_in = h_out
         #h_in = zl * 0.2 # so that z0 is 5 sigma
 
-        # tau_rho
-        tau_rho_gf = np.zeros(R.shape)
-        tau_rho_gr = np.zeros(R.shape)
+        # gas number density
+        n_gf = np.zeros(R.shape)
+        n_gr = np.zeros(R.shape)
+
 
         # check which is fore or rear side
         side = np.sign(np.cos(self._inc_rad)) # cos(-i) = cos(i)
 
-
-        #old
         # height of fore/rear layers
         z0f = zl * side
         z0r = - zl * side
@@ -365,25 +384,34 @@ class MultiLayerDisk(object):
         '''
 
         # fore layer
-        tau_rho_gf[zout_f] = self.puff_up_layer(tau_g[zout_f], z[zout_f], z0f[zout_f], h_out[zout_f])
-        tau_rho_gf[zin_f] = self.puff_up_layer(tau_g[zin_f], z[zin_f], z0f[zin_f], h_in[zin_f])
+        n_gf[zout_f] = self.puff_up_layer(N_g[zout_f], z[zout_f], z0f[zout_f], h_out[zout_f])
+        n_gf[zin_f] = self.puff_up_layer(N_g[zin_f], z[zin_f], z0f[zin_f], h_in[zin_f])
 
         # rear layer
-        tau_rho_gr[zout_r] = self.puff_up_layer(tau_g[zout_r], z[zout_r], z0r[zout_r], h_out[zout_r])
-        tau_rho_gr[zin_r] = self.puff_up_layer(tau_g[zin_r], z[zin_r], z0r[zin_r], h_in[zin_r])
+        n_gr[zout_r] = self.puff_up_layer(N_g[zout_r], z[zout_r], z0r[zout_r], h_out[zout_r])
+        n_gr[zin_r] = self.puff_up_layer(N_g[zin_r], z[zin_r], z0r[zin_r], h_in[zin_r])
 
-        tau_rho_gf = tau_rho_gf.clip(1.e-30, None)
-        tau_rho_gr = tau_rho_gr.clip(1.e-30, None)
+        n_gf = n_gf.clip(1.e-30, None)
+        n_gr = n_gr.clip(1.e-30, None)
 
         # line width
-        if mmol is not None:
-            vth = np.sqrt(2. * kb * T_g / mmol / mH) * 1.e-5 # km/s
-            vnth = self.dv * (R / self.r0)**(- self.pdv) if self.dv > 0. else self.dv
-            dv = np.sqrt(vth * vth + vnth * vnth)
+        if dv_mode == 'thermal':
+            if self.mmol is not None:
+                vth = np.sqrt(2. * kb * T_g / self.mmol / mH) * 1.e-5 # km/s
+                vnth = self.dv * (R / self.r0)**(- self.pdv) if self.dv > 0. else self.dv
+                dv = np.sqrt(vth * vth + vnth * vnth)
+            else:
+                print('ERROR\tbuild_gas_layer: line should be specified to use')
+                print("ERROR\tbuild_gas_layer:  dv_mode == 'thermal'.")
+                return 0
+        elif dv_mode == 'total':
+            dv = self.dv * (R / self.r0)**(- self.pdv) if self.dv > 0. else self.dv
         else:
+            print('ERROR\tbuild_gas_layer: dv_mode must be thermal or total.')
+            print("ERROR\tbuild_gas_layer: Ignore the input and assume dv is the total line width.")
             dv = self.dv * (R / self.r0)**(- self.pdv) if self.dv > 0. else self.dv
 
-        return T_g, vlos, tau_rho_gf, tau_rho_gr, dv
+        return T_g, vlos, n_gf, n_gr, dv
 
 
     def build_dust_layer(self, R, rin = 0.1):
@@ -392,12 +420,12 @@ class MultiLayerDisk(object):
         return T, tau
 
 
-    def build(self, rin = 0.1, mmol = None):
+    def build(self, rin = 0.1, dv_mode = 'total'):
         # for each nested level
         T_g = [None] * self.grid.nlevels
         T_d = [None] * self.grid.nlevels
-        tau_rho_gf = [None] * self.grid.nlevels
-        tau_rho_gr = [None] * self.grid.nlevels
+        n_gf = [None] * self.grid.nlevels
+        n_gr = [None] * self.grid.nlevels
         tau_d = [None] * self.grid.nlevels
         vlos = [None] * self.grid.nlevels
         dv = [None] * self.grid.nlevels
@@ -408,47 +436,65 @@ class MultiLayerDisk(object):
 
         for l in range(self.grid.nlevels):
             # get temperature and volume tau
-            _T_g, _vlos, _tau_rho_gf, _tau_rho_gr, _dv = \
+            _T_g, _vlos, _n_gf, _n_gr, _dv = \
             self.build_gas_layer(self.Rs[l].copy(), 
-                self.ts[l].copy(), self.zps[l].copy(), mmol = mmol)
-            _T_d, _tau_d = self.build_dust_layer(self.Rmid[l])
+                self.ts[l].copy(), self.zps[l].copy(), dv_mode = dv_mode)
+            _T_d, _tau_d = self.build_dust_layer(self.Rmid[l].copy())
             _vlos += self.vsys
             T_g[l] = _T_g
             vlos[l] = _vlos
-            tau_rho_gf[l] = _tau_rho_gf
-            tau_rho_gr[l] = _tau_rho_gr
+            n_gf[l] = _n_gf
+            n_gr[l] = _n_gr
             T_d[l] = _T_d
             tau_d[l] = _tau_d
             dv[l] = _dv
 
         T_g = self.grid.collapse(T_g)
         vlos = self.grid.collapse(vlos)
-        tau_rho_gf = self.grid.collapse(tau_rho_gf)
-        tau_rho_gr = self.grid.collapse(tau_rho_gr)
+        n_gf = self.grid.collapse(n_gf)
+        n_gr = self.grid.collapse(n_gr)
         T_d = self.grid2D.collapse(T_d)
         tau_d = self.grid2D.collapse(tau_d)
 
-        if self.dv > 0.:
+        if (self.dv > 0.) | (dv_mode == 'thermal'):
             dv = self.grid.collapse(dv)
 
-        return T_g, vlos, tau_rho_gf, tau_rho_gr, T_d, tau_d, dv
+        return T_g, vlos, n_gf, n_gr, T_d, tau_d, dv
 
 
-    def build_cube(self, Tcmb = 2.73, f0 = 230., dist = 140., mmol = None):
-        T_g, vlos, tau_rho_gf, tau_rho_gr, T_d, tau_d, dv = self.build(mmol = mmol)
+    def build_cube(self, Tcmb = 2.73, f0 = 230., 
+        dist = 140., dv_mode = 'total', contsub = True):
+        T_g, vlos, n_gf, n_gr, T_d, tau_d, dv = self.build(dv_mode = dv_mode)
 
-        # to cube
-        if self.dv > 0.:
+        # To cube
+        #  calculate column density and density-weighted temperature 
+        #  of each gas layer at every velocity channel.
+        if (self.dv > 0.) | (dv_mode == 'thermal'):
             #dv = self.grid.collapse(dv)
-            Tv_gf, Tv_gr, tau_v_gf, tau_v_gr = np.transpose(
-            ttldisk.Ttdv_to_cube(T_g, tau_rho_gf, tau_rho_gr, vlos, dv, self.ve, self.grid.dz),
+            Tv_gf, Tv_gr, N_v_gf, N_v_gr = np.transpose(
+            Tndv_to_cube(T_g, n_gf, n_gr, vlos, dv, self.ve, self.grid.dz),
             (0,3,2,1)) # np.transpose(Tt_cube, (0,1,3,2))
         else:
-            Tv_gf, Tv_gr, tau_v_gf, tau_v_gr = np.transpose(
-            ttldisk.Tt_to_cube(T_g, tau_rho_gf, tau_rho_gr, vlos, self.ve, self.grid.dz),
+            Tv_gf, Tv_gr, N_v_gf, N_v_gr = np.transpose(
+            Tt_to_cube(T_g, n_gf, n_gr, vlos, self.ve, self.grid.dz),
             (0,1,3,2,))
-            #print(np.nanmax(Tv_gf))
 
+        Tv_gf = Tv_gf.clip(1., None) # safety net to avoid zero division
+        Tv_gr = Tv_gr.clip(1., None)
+
+        # density to tau
+        #print('Tv_gf max, q: %13.2e, %.2f'%(np.nanmax(Tv_gf), self.qg))
+        #print('N_v_gf max: %13.2e'%(np.nanmax(N_v_gf)))
+        if (self.line is not None) * (self.iline is not None):
+            tau_v_gf = self.mol.get_tau(self.line, self.iline, 
+                N_v_gf, Tv_gf, delv = self.delv * 1.e5, grid_approx = True)
+            tau_v_gr = self.mol.get_tau(self.line, self.iline, 
+                N_v_gr, Tv_gr, delv = self.delv * 1.e5, grid_approx = True)
+        else:
+            # ignore temperature effect on conversion from column density to tau
+            tau_v_gf = N_v_gf
+            tau_v_gr = N_v_gr
+        #print('tau_v_gf max: %13.2e'%(np.nanmax(tau_v_gf)))
 
         # radiative transfer
         _Bv = lambda T, v: Bvppx(T, v, self.grid.dx, self.grid.dy, 
@@ -458,16 +504,21 @@ class MultiLayerDisk(object):
         _Bv_gf  = _Bv(Tv_gf, f0)
         _Bv_gr  = _Bv(Tv_gr, f0)
         _Bv_d   = _Bv(T_d, f0)
-        Iv = solve_box3LRT(_Bv_gf, _Bv_gr, _Bv_d, 
+        Iv = solve_MLRT(_Bv_gf, _Bv_gr, _Bv_d, 
             tau_v_gf, tau_v_gr, tau_d, _Bv_cmb, self.nv)
 
+        if contsub == False:
+            Iv_d = (_Bv_d - _Bv_cmb) * (1. - np.exp(- tau_d))
+            Iv_d = np.tile(Iv_d, (self.nv,1,1,))
+            Iv += Iv_d # add continuum back
+
         # Convolve beam if given
+        #print('I_v_nobeam max: %13.2e'%(np.nanmax(Iv)))
         if self.beam is not None:
             Iv = beam_convolution(self.grid2D.xx.copy(), self.grid2D.yy.copy(), Iv, 
                 self.beam, self.gaussbeam)
 
-        print(np.nanmax(self.grid2D.xx))
-
+        #print('I_v max: %13.2e'%(np.nanmax(Iv)))
         return Iv
 
 
@@ -487,14 +538,14 @@ class MultiLayerDisk(object):
         else:
             z = z[nx//2, :, :]
 
-        T_g, vlos, tau_rho_gf, tau_rho_gr, T_d, tau_d, dv = self.build()
+        T_g, vlos, n_gf, n_gr, T_d, tau_d, dv = self.build()
 
-        tau_g = tau_rho_gf + tau_rho_gr
+        n_g = n_gf + n_gr
 
         fig = plt.figure()
         ax = fig.add_subplot(111)
 
-        ax.pcolormesh(z, y, tau_g[nx//2, :, :])
+        ax.pcolormesh(z, y, n_g[nx//2, :, :])
         ymin, ymax = np.nanmin(y), np.nanmax(y)
         zmin, zmax = np.nanmin(z), np.nanmax(z)
         ax.set_ylim(ymin, ymax)
@@ -513,16 +564,16 @@ class MultiLayerDisk(object):
         x, y, z = self.grid.xx, self.grid.yy, self.grid.zz
         nx, ny, nz = self.grid.nx, self.grid.ny, self.grid.nz
 
-        T_g, vlos, tau_rho_gf, tau_rho_gr, T_d, tau_d, dv = self.build()
+        T_g, vlos, n_gf, n_gr, T_d, tau_d, dv = self.build()
 
-        tau_g = tau_rho_gf + tau_rho_gr
+        n_g = n_gf + n_gr
 
         fig = plt.figure()
         ax1 = fig.add_subplot(121)
         ax2 = fig.add_subplot(122)
 
-        ax1.pcolormesh(x[:, :, nz//2], y[:, :, nz//2], tau_g[:, :, nz//2])
-        ax2.pcolormesh(R[:, ny//2, :], z[:, ny//2, :], tau_g[:, ny//2, :])
+        ax1.pcolormesh(x[:, :, nz//2], y[:, :, nz//2], n_g[:, :, nz//2])
+        ax2.pcolormesh(R[:, ny//2, :], z[:, ny//2, :], n_g[:, ny//2, :])
         #ymin, ymax = np.nanmin(y), np.nanmax(y)
         #zmin, zmax = np.nanmin(z), np.nanmax(z)
         #ax.set_ylim(ymin, ymax)
@@ -542,15 +593,15 @@ class MultiLayerDisk(object):
         x = x[:, :, nz//2,]
         y = y[:, :, nz//2,]
 
-        T_g, vlos, tau_rho_gf, tau_rho_gr, T_d, tau_d, dv = self.build()
+        T_g, vlos, n_gf, n_gr, T_d, tau_d, dv = self.build()
 
-        tau_g = tau_rho_gf + tau_rho_gr
+        n_g = n_gf + n_gr
 
         fig = plt.figure()
         ax = fig.add_subplot(111)
 
-        ax.pcolormesh(x, y, np.nansum(tau_g, axis = 2))
-        ax.pcolormesh(x, y, np.nansum((vlos - self.vsys) * tau_rho_gf, axis = 2) / np.nansum(tau_rho_gf, axis = 2),
+        ax.pcolormesh(x, y, np.nansum(n_g, axis = 2))
+        ax.pcolormesh(x, y, np.nansum((vlos - self.vsys) * n_gf, axis = 2) / np.nansum(n_gf, axis = 2),
             cmap = 'RdBu_r', vmin = -5, vmax = 5.)
         #ax.contour(x, y, np.nansum(tau_rho_gf, axis = 2), colors = 'red')
         #ax.contour(x, y, np.nansum(tau_rho_gr, axis = 2), colors = 'blue')

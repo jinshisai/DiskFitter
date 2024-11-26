@@ -15,6 +15,8 @@ from .grid import Nested2DGrid, SubGrid2D
 from .mpe import BayesEstimator
 
 
+np.random.seed(42)
+
 
 ### constants
 Ggrav  = constants.G.cgs.value        # Gravitational constant
@@ -404,6 +406,7 @@ class FitThinModel(object):
             nwalkers = nwalkers, nrun = nrun, nburn = nburn, labels = labels,
             show_progress = show_progress, optimize_ini = optimize_ini, moves = moves,
             symmetric_error = symmetric_error, npool = npool, f_rand_init=0.1)
+        self.pfit = BE.pfit
         self.popt = BE.pfit[0]
         self.perr = BE.pfit[1:]
 
@@ -571,8 +574,8 @@ class DiMO(object):#, FitThinModel):
      params_fixed (dict): Fixed parameters
     """
     def __init__(self, model, params_free, params_fixed, 
-        beam = None, dist = 140., build_args = None, 
-        sampling = False, n_subgrid = 1,
+        beam = None, dist = 140., line = None, iline = None, dv_mode = 'total',
+        build_args = None, sampling = False, n_subgrid = 1,
         n_nest = None, x_nestlim = None, y_nestlim = None, z_nestlim = None,
         xscale = 0.5, yscale = 0.5, zscale = 0.5):
 
@@ -609,6 +612,8 @@ class DiMO(object):#, FitThinModel):
         self.n_nest = n_nest
         self.x_nestlim, self.y_nestlim, self.z_nestlim = x_nestlim, y_nestlim, z_nestlim
         self.xscale, self.yscale = xscale, yscale
+        self.line = line
+        self.iline = iline
 
 
     def fit_cube(self, params: dict, pranges:list, 
@@ -842,12 +847,14 @@ class DiMO(object):#, FitThinModel):
 
 
     # define fitting function
-    def fit_multilayer_model(self, params, pranges, d, derr, x, y, z, v,
-        Tcmb = 2.73, f0 = 230., dist = 140., mmol = None,
+    def fit_multilayer_model(self, params, pranges, 
+        d, derr, x, y, z, v,
+        Tcmb = 2.73, f0 = 230., dv_mode = 'total',
         outname = 'modelfitter_results', nwalkers=None, 
         nrun=2000, nburn=1000, labels=[], show_progress=True, 
         optimize_ini=False, moves = emcee.moves.StretchMove(), 
-        symmetric_error=False, npool = 1, f_rand_init = 1., reslim = 10):
+        symmetric_error=False, npool = 1, f_rand_init = 1., reslim = 10.,
+        show_results = True):
         axes = [x, y, z, v]
         # drop unecessary axis
         d = np.squeeze(d)
@@ -878,12 +885,16 @@ class DiMO(object):#, FitThinModel):
             # Likelihood function (in log)
             exp = -0.5 * np.nansum((d-mdl)**2/(derr*derr) 
                 + np.log(2.*np.pi*derr*derr)) / Rbeam_pix
+
+            #print(np.isfinite(exp))
+            #print('Mean: %13.3e'%(np.sqrt(np.nanmean((mdl - d)**2.)/derr**2.)))
+            #print('ideal: %13.3e'%(-0.5 * np.nansum((d-d)**2/(derr*derr) + np.log(2.*np.pi*derr*derr)) / Rbeam_pix))
+            #print('lnlike: %13.3e'%(exp))
             if np.isnan(exp):
                 return -np.inf
             else:
                 return exp
 
-        print('Rbeam_pix ', Rbeam_pix)
 
         # labels
         if len(labels) != len(params): labels = self.pfree_keys
@@ -893,6 +904,7 @@ class DiMO(object):#, FitThinModel):
         model = self.model(x, y, z, v,
             xlim = None, ylim = None, zlim = None,
             nsub = self.n_nest, reslim = reslim,
+            line = self.line, iline = self.iline,
             adoptive_zaxis = True, cosi_lim = 0.5, beam = self.beam,)
         model.grid.gridinfo()
 
@@ -918,28 +930,38 @@ class DiMO(object):#, FitThinModel):
                     (len(v), ny, nx)
                     )[:, smpl_y//2::smpl_y, smpl_x//2::smpl_x]
 
+
             # merge free parameters to fixed parameters
             params_free = dict(zip(self.pfree_keys, [*params]))
+            #print('p input')
+            #print(params_free)
             _params_full = merge_dictionaries(params_free, self.params_fixed)
             params_full = list(
                 {k: _params_full[k] for k in self.model_keys}.values()
                 ) # reordered elements
 
             # update parameters
-            model.set_params(*params_full)
+            _model = model.copy() # to make sure parallel calculations go well
+            _model.set_params(*params_full)
+            #model.set_params(*self.params_ini)
+            #print('p in model')
             #print(_params_full)
             #model.check_params()
 
             # renew grid
             if renew_grid:
-                model.deproject_grid()
+                _model.deproject_grid()
 
             # cube on the original grid
-            modelcube = model.build_cube(
-                Tcmb = Tcmb, f0 = f0, dist = dist, mmol = mmol)
-            #print(np.nanmin(model.Rs[0]), np.nanmax(model.Rs[0]))
-            print('Tg %.f K, Mean resid %.2f'%(model.Tg0,
-                np.sqrt(np.nanmean((d_smpld - modelcube[:, smpl_y//2::smpl_y, smpl_x//2::smpl_x])**2.))/derr))
+            modelcube = _model.build_cube(
+                Tcmb = Tcmb, f0 = f0, dist = self.dist, dv_mode = dv_mode)
+
+            # debug
+            #print('Iv,max out: %13.2e'%(np.nanmax(modelcube)))
+            #print('Iv,data: %13.2e'%(np.nanmax(d_smpld)))
+            #print(np.sqrt(np.nanmean(d_smpld**2.)/derr**2.))
+            #print(np.sqrt(np.nanmean((modelcube[:, smpl_y//2::smpl_y, smpl_x//2::smpl_x] - d_smpld)**2.)/derr**2.))
+
             return modelcube[:, smpl_y//2::smpl_y, smpl_x//2::smpl_x]
 
 
@@ -949,7 +971,8 @@ class DiMO(object):#, FitThinModel):
         BE.run_mcmc(p0, pranges, outname=outname,
             nwalkers = nwalkers, nrun = nrun, nburn = nburn, labels = labels,
             show_progress = show_progress, optimize_ini = optimize_ini, moves = moves,
-            symmetric_error = symmetric_error, npool = npool, f_rand_init = f_rand_init)
+            symmetric_error = symmetric_error, npool = npool, f_rand_init = f_rand_init,
+            show_results = show_results)
         self.pfit = BE.pfit.copy()
         self.popt = BE.pfit[0]
         self.perr = BE.pfit[1:]
@@ -981,6 +1004,7 @@ def mathlabels(pylabels):
     'gamma_d': r'$\gamma_\mathrm{d}$',
     'Tg0': r'$T_{\mathrm{g},0}$',
     'qg': r'$q_\mathrm{g}$',
+    'log_N_gc': r'$\log N_\mathrm{c,g}$',
     'log_tau_gc': r'$\log \tau_\mathrm{c,g}$',
     'rc_g': r'$R_\mathrm{c,g}$',
     'gamma_g': r'$\gamma_\mathrm{g}$',

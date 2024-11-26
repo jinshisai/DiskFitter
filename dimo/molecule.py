@@ -3,7 +3,9 @@ import os
 import sys
 import math
 import glob
+import pandas as pd
 import numpy as np
+import time
 from astropy import constants, units
 
 # constants (in cgs)
@@ -22,14 +24,18 @@ mp     = constants.m_p.cgs.value      # Proton mass (g)
 
 # path to here
 path_to_here = os.path.dirname(__file__)
-path_to_library = path_to_here[:-11]
+path_to_library = path_to_here + '/'
+
+
+# Ignore divide-by-zero warning
+np.seterr(divide='ignore')
 
 
 
 class MolData():
 
 
-    def __init(self, line):
+    def __init__(self, line):
         self.line = line
         self.read_lamda_moldata()
 
@@ -105,19 +111,22 @@ class MolData():
         self.dE = dE
 
 
-    def params_ul(self, Ju):
+    def params_trans(self, iline):
         # line Ju --> Jl
-        trans = self.trans[Ju]
-        freq = self.freq[Ju-1] * 1e9 # Hz
-        Aul     = self.Acoeff[Ju-1]
-        gu      = self.gJ[Ju]
-        gl      = self.gJ[Ju-1]
-        Eu     = self.EJ[Ju]
-        El     = self.EJ[Ju-1]
+        Ju = self.Jup[iline-1]
+        Jl = self.Jlow[iline-1]
+
+        trans = self.trans[iline-1]
+        freq = self.freq[iline-1] * 1e9 # Hz
+        Aul     = self.Acoeff[iline-1]
+        gu      = self.gJ[Ju-1]
+        gl      = self.gJ[Jl-1]
+        Eu     = self.EJ[Ju-1]
+        El     = self.EJ[Jl-1]
         return trans, freq, Aul, gu, gl, Eu, El
 
 
-    def partfunc_grid(self, Tmin, Tmax, ngrid, scale = 'linear'):
+    def partition_grid(self, Tmin, Tmax, ngrid, scale = 'linear'):
         '''
         Make a grid for the partition function.
 
@@ -149,10 +158,10 @@ class MolData():
 
 
 
-def Molecule():
+class Molecule():
 
 
-    def __init(self, molecules):
+    def __init__(self, molecules):
         self.moldata = {}
 
         if (type(molecules) == list) or (type(molecules) == tuple):
@@ -164,7 +173,7 @@ def Molecule():
             print('ERROR\tLTEAnalysis: molecules must be str, or list or tuple of strings.')
 
 
-    def get_tau(self, line, Ju, Ntot, Tex, delv = None, grid_approx = True):
+    def get_tau(self, line, iline, Ntot, Tex, delv = None, grid_approx = True):
         '''
         Calculate the optical depth under the local thermal equilibrium (LTE) assumption.
 
@@ -177,22 +186,42 @@ def Molecule():
          delv (float): Line width (FWHM) of the line (cm s^-1). If given, tau_v will be calculated,
                        else tau_total integrated over frequency will be returned.
         '''
-        trans, freq, Aul, gu, gl, Eu, El = self.moldata[line].params_ul(Ju)
+        #Ju = self.moldata[line].Jup[iline]
+        #Jl = self.moldata[line].Jlow[iline]
+        trans, freq, Aul, gu, gl, Eu, El = self.moldata[line].params_trans(iline)
 
         # partition function
         if grid_approx:
-            # currently 0th order approx. only
-            Qrot = self.moldata[line]._PFgrid[np.nanargmin(
-                (self.moldata[line]._Tgrid - Tex)**2.)]
+            if type(Tex) == np.ndarray:
+                #start = time.time()
+                # Perform linear interpolation
+                Qrot = np.interp(Tex.ravel(),
+                    self.moldata[line]._Tgrid, self.moldata[line]._PFgrid)
+                Qrot = Qrot.reshape(Tex.shape)
+                #end = time.time()
+                #print('PF takes %13.2e s'%(end-start))
+            else:
+                # currently 0th order approx. only
+                Qrot = self.moldata[line]._PFgrid[np.nanargmin(
+                    (self.moldata[line]._Tgrid - Tex)**2.)]
         else:
             Qrot = self.moldata[line].partition_function(Tex)
 
+        # debug
+        #print('Qrot,min Qrot,max: %13.3e %13.3e'%(np.nanmin(Qrot), np.nanmax(Qrot)))
+        #print('gu Eu freq: %.2f %.2f %.2f'%(gu, Eu, freq*1e-9))
+        #print('Tex,min: %.2f'%(np.nanmin(Tex)))
+
         if delv is not None:
             # return tau_v
-            return (clight*clight*clight)/(8.*np.pi*freq_ul*freq_ul*freq_ul)*(gu/Qrot)\
-            *np.exp(-Eu/Tex)*Ntot*Aul*(np.exp(hp*freq_ul/(kb*Tex)) - 1.) / delv
+            return (clight*clight*clight)/(8.*np.pi*freq*freq*freq)*(gu/Qrot)\
+            *np.exp(-Eu/Tex)*Ntot*Aul*(np.exp(hp*freq/(kb*Tex)) - 1.) / delv #/ 0.5 / np.sqrt(np.pi / np.log(2.))
         else:
             # return tau_total, integrated over frequency
-            return (clight*clight)/(8.*np.pi*freq_ul*freq_ul)*(gu/Qrot)\
-            *np.exp(-Eu/Tex)*Ntot*Aul*(np.exp(hp*freq_ul/(kb*Tex)) - 1.)
+            return (clight*clight)/(8.*np.pi*freq*freq)*(gu/Qrot)\
+            *np.exp(-Eu/Tex)*Ntot*Aul*(np.exp(hp*freq/(kb*Tex)) - 1.)
+
+
+def McDowell_partition_function(T, B0):
+    return kb * T / hp / B0 * np.exp(hp * B0 / 3. / kb / T)
 
