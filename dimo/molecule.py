@@ -215,7 +215,7 @@ class Molecule():
         if delv is not None:
             # return tau_v
             return (clight*clight*clight)/(8.*np.pi*freq*freq*freq)*(gu/Qrot)\
-            *np.exp(-Eu/Tex)*Ntot*Aul*(np.exp(hp*freq/(kb*Tex)) - 1.) / delv
+            *np.exp(-Eu/Tex)*Ntot*Aul*(np.exp(hp*freq/(kb*Tex)) - 1.) / delv #/ 0.5 / np.sqrt(np.pi / np.log(2.))
         else:
             # return tau_total, integrated over frequency
             return (clight*clight)/(8.*np.pi*freq*freq)*(gu/Qrot)\
