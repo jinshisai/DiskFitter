@@ -13,19 +13,17 @@ import numpy as np
 from datetime import datetime
 import matplotlib.pyplot as plt
 import scipy.optimize as op
-from scipy.stats import gaussian_kde
 import emcee
 import corner
 from typing import Callable
 from multiprocessing.dummy import Pool
-import gc
-
-from .funcs import gauss1d
+from mpipool import MPIPool
 
 
-### Functions for MCMC
+
+# Functions
 # Logarithm of prior distribution
-def uniform_lnprior(params, pranges):
+def lnprior(params, pranges):
     # If all parameters are within the given parameter ranges
     if np.all((pranges[0] < params) * (params < pranges[1])):
         return 0.0
@@ -33,7 +31,7 @@ def uniform_lnprior(params, pranges):
         return -np.inf
 
 # Logarithm of likelihood function assuming Gaussian distribution
-def gauss_lnlike(params, d, derr, fmodel, *x):
+def lnlike(params, d, derr, fmodel, *x):
     model = fmodel(*x, *params)
 
     # Likelihood function (in log)
@@ -44,30 +42,15 @@ def gauss_lnlike(params, d, derr, fmodel, *x):
         return exp
 
 # Logarithm of posterior distribution
-#def lnprob(params, pranges, d, derr, fmodel, *x):
-#    # According to Bayes' theorem
-#    return  lnprior(params, pranges) + lnlike(params, d, derr, fmodel, *x)
+def lnprob(params, pranges, d, derr, fmodel, *x):
+    # According to Bayes' theorem
+    return  lnprior(params, pranges) + lnlike(params, d, derr, fmodel, *x)
 
+# gaussian
+def gauss1d(x,amp,mean,sig):
+    return amp * np.exp(-(x-mean)*(x-mean)/(2.0*sig*sig))
 
-def sample_mode(samples, ngrid = 1000):
-    ns, ndim = samples.shape
-
-    modes = []
-    for i in range(ndim):
-        _samples = samples[:,i]
-        kde = gaussian_kde(_samples)
-        x = np.linspace(min(_samples), max(_samples), ngrid)
-        mode = x[np.argmax(kde(x))]
-        modes.append(mode)
-
-        # for check
-        #print('mode %.2f'%mode)
-        #print('median %.2f'%np.median(_samples))
-
-    return modes
-
-
-### Python class for model fitting
+# Python class for model fitting
 class BayesEstimator():
     '''
     Estimate the best parameters for a given model and a data set using Bayesian methods.
@@ -75,8 +58,7 @@ class BayesEstimator():
 
     # initialize
     def __init__(self, axes: list, data: np.ndarray, 
-        sig_d: float or np.ndarray, model: Callable,
-        lnlike: Callable = gauss_lnlike, lnprior: Callable = uniform_lnprior):
+        sig_d: float or np.ndarray, model: Callable):
         '''
 
         Parameters
@@ -98,17 +80,13 @@ class BayesEstimator():
         self.pini    = None
         self.pranges = None
 
-        # prior/likelihood functions
-        self.lnlike = lnlike
-        self.lnprior = lnprior
-
 
     # Run mcmc
     def run_mcmc(self, pini, pranges, outname=None,
         nwalkers=None, nrun=5000, nburn=500, labels=[], show_progress=True,
         f_rand_init=0.1, credible_interval=0.68, show_results=True,
-        optimize_ini=True, moves=emcee.moves.StretchMove(), symmetric_error=False,
-        npool=1, errtype='gauss', savefig = True, savesampler = True,):
+        optimize_ini=True, moves=emcee.moves.WalkMove(), symmetric_error=False,
+        npool=1, errtype='gauss'):
         '''
         A wrapper to run MCMC with emcee.
 
@@ -136,9 +114,9 @@ class BayesEstimator():
             outname = 'modelfit'
 
         # Output name
-        out_chain    = outname + '_chain'
-        out_triangle = outname + '_triangle.pdf'
-        out_text     = outname + '_results.txt'
+        out_chain    = outname + '_mcmc_chain'
+        out_triangle = outname + '_mcmc_triangle.pdf'
+        out_text     = outname + '_mcmc_results.txt'
 
         # Param labels
         if len(labels) == 0:
@@ -153,7 +131,7 @@ class BayesEstimator():
         # Initial set of positions for walkers
         # Maximum likelihood
         if optimize_ini:
-            nll = lambda params, args: -self.lnlike(params, *args) # negative ln likelihood
+            nll = lambda params, args: -lnlike(params, *args) # negative ln likelihood
             res = op.minimize(nll, pini, [self.data, self.sig_d, self.model, *self.axes],
                 bounds=[ [pranges[0][i], pranges[1][i]] for i in range(ndim) ],
                 method='Nelder-Mead', tol=1e-3)
@@ -172,14 +150,6 @@ class BayesEstimator():
         p0 = [pini + random[:,i] for i in range(nwalkers)]
 
 
-        # save samples?
-        if savesampler:
-            backend = emcee.backends.HDFBackend(outname + '_sample.h5')
-            backend.reset(nwalkers, ndim)
-        else:
-            backend = None
-
-
         # Begin MCMC run
         print ('Run MCMC!')
 
@@ -192,31 +162,48 @@ class BayesEstimator():
         self.nburn = nburn
         self.nrun = nrun
 
-
-        # Logarithm of posterior distribution
-        def lnprob(params, pranges, d, derr, fmodel, *x):
-            # According to Bayes' theorem
-            return  self.lnprior(params, pranges) + self.lnlike(params, d, derr, fmodel, *x)
-
-
         # Multi processing
         if npool > 1:
             with Pool(npool) as pool:
                 # Choose sampler
                 sampler = emcee.EnsembleSampler(nwalkers, ndim, lnprob, 
                         args=[self.pranges, self.data, self.sig_d, self.model, *self.axes],
-                        pool=pool, moves=moves, backend = backend)
+                        pool=pool, moves=moves,)
                 # Run nrun steps showing progress
                 results = sampler.run_mcmc(p0, nrun, progress=True)
         else:
             # Choose sampler
             sampler = emcee.EnsembleSampler(nwalkers, ndim, lnprob, 
                     args=[self.pranges, self.data, self.sig_d, self.model, *self.axes],
-                    moves=moves, backend = backend)
+                    moves=moves,)
             # Run nrun steps showing progress
             results = sampler.run_mcmc(p0, nrun, progress=True,)
         self.sampler = sampler
         self.results = results
+
+        # Result figures
+        #  Chain plot
+        for n0, fout in zip(
+            [0, nburn], 
+            [out_chain + '_full.pdf', out_chain + '_conv.pdf']):
+            fig, axes = plt.subplots(ndim, 1, figsize=(11.69, 8.27), sharex=True)
+            xplot = np.arange(n0, nrun, 1)
+            for i, ax in enumerate(axes):
+                chain_plot = np.array(
+                [ax.plot(xplot, sampler.chain[iwalk,n0:,i].T, 'k')
+                 for iwalk in range(nwalkers)])
+                ax.set_ylabel(labels[i])
+                ax.tick_params(which='both', direction='in',
+                    bottom=True, top=True, left=True, right=True, labelbottom=False)
+            # x-label
+            axes[0].set_xlim(n0,nrun)
+            axes[-1].tick_params(labelbottom=True)
+            axes[-1].set_xlabel('Step number')
+            fig.savefig(fout, transparent=True)
+            if show_results:
+                plt.show()
+            else:
+                plt.close()
 
 
         # Burn first nburn steps
@@ -256,7 +243,7 @@ class BayesEstimator():
             else:
                 print('Credible interval: %i percent'%(credible_interval*100.))
                 print('mode lower upper')
-                f.write('# param 50th %.fth %.fth\n'%(50*(1. - credible_interval), 50*(1. + credible_interval)))
+                f.write('# param 50th %ith %ith\n'%(50*(1. - credible_interval), 50*(1. + credible_interval)))
                 for i in range(ndim):
                     p_mcmc = np.percentile(samples[:, i], 
                         [50*(1. - credible_interval), 50, 50*(1. + credible_interval)])
@@ -266,32 +253,10 @@ class BayesEstimator():
                     f.write(outtxt)
                     p_fit[:,i] = [p_mcmc[1], q[0], q[1]]
 
-        # Result figures
-        if any([show_results, savefig]):
-            # Chain plot
-            for n0, fout in zip(
-                [0, nburn], 
-                [out_chain + '_full.pdf', out_chain + '_conv.pdf']):
-                fig, axes = plt.subplots(ndim, 1, figsize=(11.69, 8.27), sharex=True)
-                xplot = np.arange(n0, nrun, 1)
-                for i, ax in enumerate(axes):
-                    chain_plot = np.array(
-                    [ax.plot(xplot, sampler.chain[iwalk,n0:,i].T, 'k')
-                     for iwalk in range(nwalkers)])
-                    ax.set_ylabel(labels[i])
-                    ax.tick_params(which='both', direction='in',
-                        bottom=True, top=True, left=True, right=True, labelbottom=False)
-                # x-label
-                axes[0].set_xlim(n0,nrun)
-                axes[-1].tick_params(labelbottom=True)
-                axes[-1].set_xlabel('Step number')
-                if savefig: fig.savefig(fout, transparent=True)
-                if show_results: plt.show()
-
-            # Corner plot
-            fig2 = corner.corner(samples, labels=labels)#, quantiles=[0.16, 0.5, 0.84])
-            if savefig: fig2.savefig(out_triangle, transparent=True)
-            if show_results: plt.show()
+        # Half triangle plot
+        fig2 = corner.corner(samples, labels=labels)#, quantiles=[0.16, 0.5, 0.84])
+        fig2.savefig(out_triangle, transparent=True)
+        if show_results: plt.show()
 
         self.pfit = p_fit
         self.get_criterion()
@@ -301,10 +266,10 @@ class BayesEstimator():
         # best parameter
         popt = self.pfit[0]
         # Akaike's Information Criterion (AIC)
-        aic = - 2. * self.lnlike(popt, self.data, self.sig_d, self.model, *self.axes)\
+        aic = - 2. * lnlike(popt, self.data, self.sig_d, self.model, *self.axes)\
          + 2.* self.ndim
         # Bayesian Information Criterion (BIC)
-        bic = - 2. * self.lnlike(popt, self.data, self.sig_d, self.model, *self.axes)\
+        bic = - 2. * lnlike(popt, self.data, self.sig_d, self.model, *self.axes)\
          + self.ndim * np.log(self.data.size)
         # output
         self.criterion = {'AIC': aic, 'BIC': bic}
