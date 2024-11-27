@@ -79,7 +79,7 @@ def Tndv_to_cube(T_g, n_gf, n_gr, vlos, dv, ve, ds,
     """
     nx, ny, nz = T_g.shape
     nv = len(ve) - 1
-    delv = ve[1] - ve[0] # channel width
+    delv = (ve[1] - ve[0]) * 1.e5 # channel width (cm s^-1)
     Tncube = np.zeros((4, nx, ny, nv))
 
     for i in prange(nx):
@@ -100,7 +100,7 @@ def Tndv_to_cube(T_g, n_gf, n_gr, vlos, dv, ve, ds,
 
                     dv_cell = dv[i, j, k]
                     vlos_cell = vlos[i, j, k]
-                    if (vl - vlos_cell) ** 2 < 25.0 * dv_cell * 0.5:
+                    if (vl - vlos_cell) ** 2 < 25.0 * dv_cell**2. * 0.5: # if less than 5 sigma
                         T_cell = T_g[i, j, k]
 
                         # Foreground side
