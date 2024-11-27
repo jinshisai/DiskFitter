@@ -81,7 +81,9 @@ cpdef cnp.ndarray[DTYPE_t, ndim=4] Tndv_to_cube(
     cdef double n_v_gf, n_v_gr
     cdef double T_gf_sum, T_gr_sum, n_gf_sum, n_gr_sum
     cdef double vl
+    cdef delv = ve[1] - ve[0] # velocity resolution
     cdef int i, j, k, l
+    cdef double vlos_ijk, dv_ijk, T_g_ijk
 
     #for l in range(nv):
     for i in range(nx):
@@ -92,35 +94,42 @@ cpdef cnp.ndarray[DTYPE_t, ndim=4] Tndv_to_cube(
                 T_gr_sum = 0.
                 n_gf_sum = 0.
                 n_gr_sum = 0.
+
                 for k in range(nz):
+                    vlos_ijk = vlos[i,j,k]
+                    dv_ijk = dv[i,j,k]
+                    T_g_ijk = T_g[i,j,k]
                     # calculate smearing effect
                     # only when the velocity separation is less than 5 Gaussian sigma
-                    if (vl - vlos[i,j,k]) * (vl - vlos[i,j,k]) < 25. * dv[i,j,k] * 0.5:
+                    if (((vl - vlos_ijk)**2 < 25. * dv_ijk**2 * 0.5) and (delv < dv_ijk)):
                         # fore side
-                        # tau
                         n_v_gf = glnprof(
-                            n_gf[i,j,k] * ds, vl, vlos[i,j,k],
-                            dv[i,j,k], 1.
-                            )
-                        n_gf_sum += n_v_gf
-                        # temperature
-                        T_gf_sum += T_g[i,j,k] * n_v_gf
+                            n_gf[i,j,k] * ds, vl, vlos_ijk,
+                            dv_ijk, 1.
+                            ) * 1.e-5 # cm^-3 (cm s^-1)^-1
 
                         # rear side
-                        # tau
                         n_v_gr = glnprof(
-                            n_gr[i,j,k] * ds, vl, vlos[i,j,k],
-                            dv[i,j,k], 1.
-                            )
-                        n_gr_sum += n_v_gr
-                        # temperature
-                        T_gr_sum += T_g[i,j,k] * n_v_gr
+                            n_gr[i,j,k] * ds, vl, vlos_ijk,
+                            dv_ijk, 1.
+                            ) * 1.e-5 # cm^-3 (cm s^-1)^-1
+                    elif ((ve[l] <= vlos_ijk) and (vlos_ijk < ve[l+1])):
+                        n_v_gf = n_gf[i,j,k] * ds / delv * 1.e-5 # cm^-3 (cm s^-1)^-1
+                        n_v_gr = n_gr[i,j,k] * ds / delv * 1.e-5 # cm^-3 (cm s^-1)^-1
+                    else:
+                        continue
+
+                    # sumup
+                    n_gf_sum += n_v_gf
+                    T_gf_sum += T_g_ijk * n_v_gf
+                    n_gr_sum += n_v_gr
+                    T_gr_sum += T_g_ijk * n_v_gr
 
                 if n_gf_sum > 0.:
                     Tncube[0,i,j,l] = T_gf_sum / n_gf_sum
                     Tncube[2,i,j,l] = n_gf_sum
                 if n_gr_sum > 0.:
-                    Tncube[1,i,j,l] = T_gr_sum / n_gr_sum 
+                    Tncube[1,i,j,l] = T_gr_sum / n_gr_sum
                     Tncube[3,i,j,l] = n_gr_sum
 
     return Tncube

@@ -463,7 +463,8 @@ class MultiLayerDisk(object):
 
 
     def build_cube(self, Tcmb = 2.73, f0 = 230., 
-        dist = 140., dv_mode = 'total', contsub = True):
+        dist = 140., dv_mode = 'total', contsub = True,
+        return_Ttau = False):
         T_g, vlos, n_gf, n_gr, T_d, tau_d, dv = self.build(dv_mode = dv_mode)
 
         # To cube
@@ -487,14 +488,17 @@ class MultiLayerDisk(object):
         #print('N_v_gf max: %13.2e'%(np.nanmax(N_v_gf)))
         if (self.line is not None) * (self.iline is not None):
             tau_v_gf = self.mol.get_tau(self.line, self.iline, 
-                N_v_gf, Tv_gf, delv = self.delv * 1.e5, grid_approx = True)
+                N_v_gf, Tv_gf, delv = None, grid_approx = True)
             tau_v_gr = self.mol.get_tau(self.line, self.iline, 
-                N_v_gr, Tv_gr, delv = self.delv * 1.e5, grid_approx = True)
+                N_v_gr, Tv_gr, delv = None, grid_approx = True)
         else:
             # ignore temperature effect on conversion from column density to tau
             tau_v_gf = N_v_gf
             tau_v_gr = N_v_gr
         #print('tau_v_gf max: %13.2e'%(np.nanmax(tau_v_gf)))
+
+        if return_Ttau:
+            return np.array([Tv_gf, tau_v_gf, Tv_gr, tau_v_gr])
 
         # radiative transfer
         _Bv = lambda T, v: Bvppx(T, v, self.grid.dx, self.grid.dy, 
