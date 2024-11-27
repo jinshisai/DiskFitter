@@ -113,17 +113,22 @@ cpdef cnp.ndarray[DTYPE_t, ndim=4] Tndv_to_cube(
                             n_gr[i,j,k] * ds, vl, vlos_ijk,
                             dv_ijk, 1.
                             ) * 1.e-5 # cm^-3 (cm s^-1)^-1
+
+                        # sumup
+                        n_gf_sum += n_v_gf
+                        T_gf_sum += T_g_ijk * n_v_gf
+                        n_gr_sum += n_v_gr
+                        T_gr_sum += T_g_ijk * n_v_gr
                     elif ((ve[l] <= vlos_ijk) and (vlos_ijk < ve[l+1])):
                         n_v_gf = n_gf[i,j,k] * ds / delv * 1.e-5 # cm^-3 (cm s^-1)^-1
                         n_v_gr = n_gr[i,j,k] * ds / delv * 1.e-5 # cm^-3 (cm s^-1)^-1
-                    else:
-                        continue
 
-                    # sumup
-                    n_gf_sum += n_v_gf
-                    T_gf_sum += T_g_ijk * n_v_gf
-                    n_gr_sum += n_v_gr
-                    T_gr_sum += T_g_ijk * n_v_gr
+                        # sumup
+                        n_gf_sum += n_v_gf
+                        T_gf_sum += T_g_ijk * n_v_gf
+                        n_gr_sum += n_v_gr
+                        T_gr_sum += T_g_ijk * n_v_gr
+
 
                 if n_gf_sum > 0.:
                     Tncube[0,i,j,l] = T_gf_sum / n_gf_sum

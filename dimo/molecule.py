@@ -217,8 +217,9 @@ class Molecule():
             return (clight*clight*clight)/(8.*np.pi*freq*freq*freq)*(gu/Qrot)\
             *np.exp(-Eu/Tex)*Ntot*Aul*(np.exp(hp*freq/(kb*Tex)) - 1.) / delv #/ 0.5 / np.sqrt(np.pi / np.log(2.))
         else:
-            # return tau_total, integrated over frequency
-            return (clight*clight)/(8.*np.pi*freq*freq)*(gu/Qrot)\
+            # return tau_total, integrated over velocity (not frequency!!!)
+            #  or tau_v if Ntot is in unit of cm^-2 (cm s^-1)^-1
+            return (clight*clight*clight)/(8.*np.pi*freq*freq*freq)*(gu/Qrot)\
             *np.exp(-Eu/Tex)*Ntot*Aul*(np.exp(hp*freq/(kb*Tex)) - 1.)
 
 
