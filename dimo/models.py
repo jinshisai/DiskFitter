@@ -12,7 +12,8 @@ import time
 from .funcs import beam_convolution, gaussian2d, glnprof_conv
 from .grid import Nested3DGrid, Nested2DGrid, Nested1DGrid, SubGrid2D
 #from .linecube import tocube, solve_3LRT, waverage_to_cube, integrate_to_cube, solve_box3LRT
-from .libcube.linecube import solve_MLRT, Tndv_to_cube, Tt_to_cube
+from .libcube.linecube import solve_MLRT, Tt_to_cube, Tndv_to_cube, Tndv_to_Ttaucube
+from .libcube import transfer
 from .molecule import Molecule
 
 
@@ -90,6 +91,9 @@ class MultiLayerDisk(object):
             self.mol = Molecule(line)
             self.mol.moldata[line].partition_grid(Tmin, Tmax, nTex, scale = 'linear')
             self.mmol = self.mol.moldata[line].weight
+            self.Qgrid = (self.mol.moldata[line]._Tgrid, self.mol.moldata[line]._PFgrid)
+            self.trans, self.freq, self.Aul, self.gu, self.gl, self.Eu, self.El = \
+            self.mol.moldata[line].params_trans(iline)
 
         # initialize parameters
         # dust layer
@@ -463,38 +467,37 @@ class MultiLayerDisk(object):
 
 
     def build_cube(self, Tcmb = 2.73, f0 = 230., 
-        dist = 140., dv_mode = 'total', contsub = True):
+        dist = 140., dv_mode = 'total', contsub = True,
+        return_Ttau = False):
         T_g, vlos, n_gf, n_gr, T_d, tau_d, dv = self.build(dv_mode = dv_mode)
 
         # To cube
         #  calculate column density and density-weighted temperature 
         #  of each gas layer at every velocity channel.
         if (self.dv > 0.) | (dv_mode == 'thermal'):
-            #dv = self.grid.collapse(dv)
-            Tv_gf, Tv_gr, N_v_gf, N_v_gr = np.transpose(
-            Tndv_to_cube(T_g, n_gf, n_gr, vlos, dv, self.ve, self.grid.dz),
-            (0,3,2,1)) # np.transpose(Tt_cube, (0,1,3,2))
+            if (self.line is not None) * (self.iline is not None):
+                # calculate tau
+                Tv_gf, Tv_gr, tau_v_gf, tau_v_gr = np.transpose(
+                    transfer.Tndv_to_cube(
+                    T_g, n_gf, n_gr, vlos, dv, self.ve, self.grid.dz,
+                    self.freq, self.Aul, self.Eu, self.gu, self.Qgrid),
+                    (0,3,2,1))
+            else:
+                # assume that tau is simply proportional to N (meaning that constant T)
+                Tv_gf, Tv_gr, tau_v_gf, tau_v_gr = np.transpose(
+                Tndv_to_cube(T_g, n_gf, n_gr, vlos, dv, self.ve, self.grid.dz),
+                (0,3,2,1)) # np.transpose(Tt_cube, (0,1,3,2))
         else:
-            Tv_gf, Tv_gr, N_v_gf, N_v_gr = np.transpose(
+            # assume that tau is simply proportional to N (meaning that constant T)
+            Tv_gf, Tv_gr, tau_v_gf, tau_v_gr = np.transpose(
             Tt_to_cube(T_g, n_gf, n_gr, vlos, self.ve, self.grid.dz),
             (0,1,3,2,))
 
         Tv_gf = Tv_gf.clip(1., None) # safety net to avoid zero division
         Tv_gr = Tv_gr.clip(1., None)
 
-        # density to tau
-        #print('Tv_gf max, q: %13.2e, %.2f'%(np.nanmax(Tv_gf), self.qg))
-        #print('N_v_gf max: %13.2e'%(np.nanmax(N_v_gf)))
-        if (self.line is not None) * (self.iline is not None):
-            tau_v_gf = self.mol.get_tau(self.line, self.iline, 
-                N_v_gf, Tv_gf, delv = self.delv * 1.e5, grid_approx = True)
-            tau_v_gr = self.mol.get_tau(self.line, self.iline, 
-                N_v_gr, Tv_gr, delv = self.delv * 1.e5, grid_approx = True)
-        else:
-            # ignore temperature effect on conversion from column density to tau
-            tau_v_gf = N_v_gf
-            tau_v_gr = N_v_gr
-        #print('tau_v_gf max: %13.2e'%(np.nanmax(tau_v_gf)))
+        if return_Ttau:
+            return np.array([Tv_gf, tau_v_gf, Tv_gr, tau_v_gr])
 
         # radiative transfer
         _Bv = lambda T, v: Bvppx(T, v, self.grid.dx, self.grid.dy, 

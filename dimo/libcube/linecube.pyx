@@ -19,6 +19,12 @@ cdef extern from "<math.h>": # from math
     double M_PI
 
 
+# Constants (use inline values for Cython efficiency)
+cdef double clight = 2.99792458e10  # cm/s
+cdef double kb = 1.380649e-16       # erg/K
+cdef double hp = 6.62607015e-27     # erg.s
+
+
 # Temperature and tau to cube
 @cython.boundscheck(False) # turn off bounds-checking for entire function
 @cython.wraparound(False)  # turn off negative index wrapping for entire function
@@ -126,10 +132,102 @@ cpdef cnp.ndarray[DTYPE_t, ndim=4] Tndv_to_cube(
     return Tncube
 
 
+
+# temperature, density and linewidth to cube
+@cython.boundscheck(False) # turn off bounds-checking for entire function
+@cython.wraparound(False)  # turn off negative index wrapping for entire function
+cpdef cnp.ndarray[DTYPE_t, ndim=4] Tndv_to_Ttaucube(
+    cnp.ndarray[DTYPE_t, ndim=3] T_g,
+    cnp.ndarray[DTYPE_t, ndim=3] n_gf,
+    cnp.ndarray[DTYPE_t, ndim=3] n_gr,
+    cnp.ndarray[DTYPE_t, ndim=3] vlos,
+    cnp.ndarray[DTYPE_t, ndim=3] dv,
+    cnp.ndarray[DTYPE_t, ndim=1] ve,
+    double ds,
+    double freq, double Aul, double Eu, double gu, double[:] T_Q, double[:] PF
+    ):
+
+    # variables
+    cdef int nx = T_g.shape[0]
+    cdef int ny = T_g.shape[1]
+    cdef int nz = T_g.shape[2]
+    cdef int nv = len(ve) - 1
+    cdef cnp.ndarray[DTYPE_t, ndim=4] Ttau_cube = np.zeros((4, nx, ny, nv))
+    cdef double n_v_gf, n_v_gr
+    cdef double T_gf_sum, T_gr_sum, n_gf_sum, n_gr_sum, tau_gf, tau_gr
+    cdef double vl, dv_cell, vlos_cell, T_cell
+    cdef double delv = ve[1] - ve[0]
+    cdef int i, j, k, l
+
+    #for l in range(nv):
+    for i in range(nx):
+        for j in range(ny):
+            for l in range(nv):
+                vl = 0.5 * (ve[l] + ve[l+1])
+                T_gf_sum = 0.
+                T_gr_sum = 0.
+                n_gf_sum = 0.
+                n_gr_sum = 0.
+                tau_gf = 0.0
+                tau_gr = 0.0
+
+                for k in range(nz):
+                    if (tau_gf >= 30.0) and (tau_gr >= 30.0):
+                        break
+
+                    # calculate smearing effect
+                    # only when the velocity separation is less than 5 Gaussian sigma
+                    dv_cell = dv[i, j, k]
+                    vlos_cell = vlos[i, j, k]
+                    if (vl - vlos_cell ) * (vl - vlos_cell ) < 25. * dv_cell * 0.5:
+                        T_cell = T_g[i, j, k]
+
+                        # fore side
+                        if tau_gf < 30.0:
+                            n_v_gf = glnprof(
+                                n_gf[i,j,k] * ds, vl, vlos_cell,
+                                dv_cell, 1.
+                                )
+                            n_gf_sum += n_v_gf
+                            # temperature
+                            T_gf_sum += T_cell * n_v_gf
+
+                            if n_gf_sum > 0.0:
+                                T_gf_mn = T_gf_sum / n_gf_sum # density-weighted mean temperature
+                                Qrot = interp(T_gf_mn, T_Q, PF)
+                                tau_gf = NT_to_tau(n_gf_sum, T_gf_mn, 
+                                    freq, Aul, Eu, gu, Qrot, delv)
+
+                        # rear side
+                        if tau_gr < 30.0:
+                            n_v_gr = glnprof(
+                                n_gr[i,j,k] * ds, vl, vlos_cell,
+                                dv_cell, 1.
+                                )
+                            n_gr_sum += n_v_gr
+                            # temperature
+                            T_gr_sum += T_cell * n_v_gr
+
+                            if n_gr_sum > 0.0:
+                                T_gr_mn = T_gf_sum / n_gf_sum # density-weighted mean temperature
+                                Qrot = interp(T_gr_mn, T_Q, PF)
+                                tau_gr = NT_to_tau(n_gr_sum, T_gr_mn, 
+                                    freq, Aul, Eu, gu, Qrot, delv)
+
+                if n_gf_sum > 0.:
+                    Ttau_cube[0,i,j,l] = T_gf_sum / n_gf_sum
+                    Ttau_cube[2,i,j,l] = tau_gf
+                if n_gr_sum > 0.:
+                    Ttau_cube[1,i,j,l] = T_gr_sum / n_gr_sum 
+                    Ttau_cube[3,i,j,l] = tau_gr
+
+    return Ttau_cube
+
+
 # Gaussian line broadening
 @cython.boundscheck(False) # turn off bounds-checking for entire function
 @cython.wraparound(False)  # turn off negative index wrapping for entire function
-cpdef double glnprof(
+cpdef inline double glnprof(
     double t0,
     double v,
     double v0,
@@ -146,6 +244,75 @@ cpdef double glnprof(
      fn (float): A normalizing factor. t0 will be in units of velocity if fn is not given.
     '''
     return t0 / sqrt(M_PI) / delv * exp( - (v - v0) * (v - v0) / delv / delv) * fn
+
+
+# linear interpolation
+@cython.boundscheck(False) # turn off bounds-checking for entire function
+@cython.wraparound(False)  # turn off negative index wrapping for entire function
+cpdef inline double interp(
+    double x,
+    double[:] xp,
+    double[:] fp):
+    """
+    Perform linear interpolation or extrapolation.
+
+    Parameters:
+    -----------
+    x : float
+        The x-value for which to interpolate.
+    xp : ndarray
+        The x-coordinates of the data points, must be sorted.
+    fp : ndarray
+        The y-coordinates of the data points.
+
+    Returns:
+    --------
+    float
+        Interpolated or extrapolated value at x.
+    """
+    cdef int i
+    cdef int n_xp = len(xp)
+    cdef double slope
+
+    if x < xp[0]:  # Below the first point, extrapolate
+        slope = (fp[1] - fp[0]) / (xp[1] - xp[0])
+        return fp[0] + slope * (x - xp[0])
+    elif x > xp[n_xp-1]:  # Above the last point, extrapolate
+        slope = (fp[n_xp-1] - fp[n_xp-2]) / (xp[n_xp-1] - xp[n_xp-2])
+        return fp[n_xp-1] + slope * (x - xp[n_xp-1])
+    else:  # Interpolate within bounds
+        for i in range(n_xp - 1):
+            if xp[i] <= x <= xp[i + 1]:
+                return fp[i] + (fp[i + 1] - fp[i]) * (x - xp[i]) / (xp[i + 1] - xp[i])
+
+
+@cython.boundscheck(False) # turn off bounds-checking for entire function
+@cython.wraparound(False)  # turn off negative index wrapping for entire function
+cpdef inline double NT_to_tau(
+    double Ntot, 
+    double Tex, 
+    double freq, 
+    double Aul, 
+    double Eu, 
+    double gu, 
+    double Qrot, 
+    double delv):
+    '''
+    Calculate the line optical depth.
+
+    Parameters
+    ----------
+     N (float or ndarray): Number column density of the molecule (cm^-2).
+     T (float or ndarray): Excitation temperature for the line (K).
+     freq (float): Frequency of the line (Hz).
+     Eu (float): Energy of the upper energy state (K).
+     gu (float): g of the upper energy state.
+     Aul (float): Einstein A coeffient of the transition.
+     Qrot (float or ndarray): Partition function.
+     delv (float): Linewidth or channel width (cm s^-1).
+    '''
+    return (clight*clight*clight)/(8.*M_PI*freq*freq*freq)*(gu/Qrot)\
+    *exp(-Eu/Tex)*Ntot*Aul*(exp(hp*freq/(kb*Tex)) - 1.) / delv
 
 
 # to cube
