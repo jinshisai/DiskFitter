@@ -14,6 +14,7 @@ from .grid import Nested3DGrid, Nested2DGrid, Nested1DGrid, SubGrid2D
 #from .linecube import tocube, solve_3LRT, waverage_to_cube, integrate_to_cube, solve_box3LRT
 from .libcube.linecube import solve_MLRT, Tndv_to_cube, Tt_to_cube
 from .molecule import Molecule
+from .libcube import spectra
 
 
 ### constants
@@ -63,6 +64,7 @@ class MultiLayerDisk(object):
         super(MultiLayerDisk, self).__init__()
 
         # grid
+        self.nx, self.ny, self.nz = len(x), len(y), len(z)
         self.grid = Nested3DGrid(x, y, z, xlim, ylim, zlim, nsub, reslim) # Plane of sky coordinates
         self.grid2D = Nested2DGrid(x, y, xlim, ylim, nsub, reslim)
         # Plane of sky coordinates
@@ -81,6 +83,7 @@ class MultiLayerDisk(object):
         # velocity
         self.nv = len(v)
         self.delv = np.mean(v[1:] - v[:-1]) # km / s
+        self.v = v
         self.ve = np.hstack([v - self.delv * 0.5, v[-1] + 0.5 * self.delv])
 
         # line
@@ -471,10 +474,17 @@ class MultiLayerDisk(object):
         #  calculate column density and density-weighted temperature 
         #  of each gas layer at every velocity channel.
         if (self.dv > 0.) | (dv_mode == 'thermal'):
-            #dv = self.grid.collapse(dv)
+            # old version
+            #Tv_gf, Tv_gr, N_v_gf, N_v_gr = np.transpose(
+            #Tndv_to_cube(T_g, n_gf, n_gr, vlos, dv, self.ve, self.grid.dz),
+            #(0,3,2,1)) # np.transpose(Tt_cube, (0,1,3,2))
+
+            # new version
+            lnprofs = spectra.glnprof_series(self.v, vlos.ravel(), dv.ravel()).reshape(self.nv, self.nx, self.ny, self.nz)
+            Tv_gf, Tv_gr, N_v_gf, N_v_gr = spectra.Tn_to_cube(T_g, n_gf, n_gr, lnprofs, self.grid.dz)
             Tv_gf, Tv_gr, N_v_gf, N_v_gr = np.transpose(
-            Tndv_to_cube(T_g, n_gf, n_gr, vlos, dv, self.ve, self.grid.dz),
-            (0,3,2,1)) # np.transpose(Tt_cube, (0,1,3,2))
+                np.array([Tv_gf, Tv_gr, N_v_gf, N_v_gr]),
+                (0,1,3,2,))
         else:
             Tv_gf, Tv_gr, N_v_gf, N_v_gr = np.transpose(
             Tt_to_cube(T_g, n_gf, n_gr, vlos, self.ve, self.grid.dz),

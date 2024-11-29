@@ -2,6 +2,7 @@ import numpy as np
 cimport numpy as cnp
 cimport cython # compile
 
+
 # to use numpy array
 cnp.import_array()
 
@@ -143,7 +144,7 @@ cpdef cnp.ndarray[DTYPE_t, ndim=4] Tndv_to_cube(
 # Gaussian line broadening
 @cython.boundscheck(False) # turn off bounds-checking for entire function
 @cython.wraparound(False)  # turn off negative index wrapping for entire function
-cpdef double glnprof(
+cpdef inline double glnprof(
     double t0,
     double v,
     double v0,
