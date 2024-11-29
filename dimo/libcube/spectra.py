@@ -3,7 +3,7 @@ from numba import njit, prange, config
 from math import erf
 
 # Set threading layer
-config.THREADING_LAYER = 'tbb'
+#config.THREADING_LAYER = 'tbb'
 
 @njit(parallel=True)
 def glnprof_series(v, v0, delv):
