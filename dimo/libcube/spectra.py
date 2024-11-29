@@ -1,7 +1,9 @@
 import numpy as np
-from numba import njit, prange
+from numba import njit, prange, config
 from math import erf
 
+# Set threading layer
+config.THREADING_LAYER = 'tbb'
 
 @njit(parallel=True)
 def glnprof_series(v, v0, delv):
