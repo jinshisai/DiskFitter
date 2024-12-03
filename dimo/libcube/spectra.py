@@ -28,6 +28,7 @@ def glnprof_series(v, v0, delv):
             - erf((v_min - v0[i]) / (delv[i])))
         #print(sampled_fraction)
         lnprof[:,i] = profi / np.sum(profi * dv_cell) * sampled_fraction # / f_norm
+        lnprof[:,i][lnprof[:,i] <= 3.7e-5/ np.sqrt(np.pi * delv[i])] = 0. # 5 sigma
 
     return lnprof
 
@@ -63,12 +64,14 @@ def Tn_to_cube(Tg, n_gf, n_gr, lnprof_series, dz):
                     _Tv_gf += _Tg * nv_gf
                     _Tv_gr += _Tg * nv_gr
 
-                if _Nv_gf > 0.:
-                    Nv_gf[i,j,k] = _Nv_gf * dz * 1.e-5
-                    Tv_gf[i,j,k] = _Tv_gf / _Nv_gf
+                _Nv_gf *= dz
+                _Nv_gr *= dz
+                if _Nv_gf > 1.e-10:
+                    Nv_gf[i,j,k] = _Nv_gf * 1.e-5
+                    Tv_gf[i,j,k] = _Tv_gf * dz / _Nv_gf
 
-                if _Nv_gr > 0.:
-                    Nv_gr[i,j,k] = _Nv_gr * dz * 1.e-5
-                    Tv_gr[i,j,k] = _Tv_gr / _Nv_gr
+                if _Nv_gr > 1.e-10:
+                    Nv_gr[i,j,k] = _Nv_gr * 1.e-5
+                    Tv_gr[i,j,k] = _Tv_gr * dz / _Nv_gr
 
     return Tv_gf, Tv_gr, Nv_gf, Nv_gr
