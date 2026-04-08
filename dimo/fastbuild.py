@@ -70,6 +70,14 @@ def fastbuild_twocompdisk(R, phi, z, Rmid,
             rc_g * auTOcm, gamma_g, qg, cs2)
         vlos[i] = vphi * np.cos(phii) * np.sin(inc_rad) * 1.e-5 + vsys
 
+        # for debug
+        #vlos[i] *= (np.exp(- (Ri/ rc_g)**2.))**0.01
+        #if (Ri - 200.)**2. < 1.:
+        #    #print('Ri (au), vrot, vkep, cs (km/s)')
+        #    #print((Ri, vphi * 1e-5, vkep(Ri * auTOcm, msG, zi * auTOcm) * 1.e-5, np.sqrt(cs2) * 1e-5))
+        #    print('Ri (au), vlos,rot, vlos,kep (km/s)')
+        #    print((Ri, vlos[i], vsys + vkep(Ri * auTOcm, msG, zi * auTOcm) * np.cos(phii) * np.sin(inc_rad) * 1.e-5))
+
         # dv
         dv[i] = linewidth(Ri, dv0, r0, pdv, kb, T, mmol, mH)
 

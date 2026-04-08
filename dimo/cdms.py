@@ -39,7 +39,7 @@ path_to_wt = path_to_library + 'moldata/molweights.csv'
 
 
 QN_SCHEMES = {
-    1: ["J"],
+    1: ["J", "F"], # F for hyperfine
     2: ["N", "J", "F"],
     3: ["J", "Ka", "Kc"],
     4: ["J", "K"],
@@ -60,6 +60,9 @@ COLUMN_MAPPING = {
 mw = pd.read_csv(path_to_wt, sep=' ')
 
 EN_DASH = "–"
+
+# physical constant: hc/k_B in (K * cm)
+HC_OVER_K = 1.438776877  # K·cm  (standard spectroscopic conversion)
 
 class CDMS():
     '''
@@ -172,9 +175,9 @@ class CDMS():
 
         # Especially about J transitions
         if 'J' in labels:
-            self.J = np.append(qn_low['J'], qn_up['J'][-1])
-            self.Jlow = qn_low['J']
-            self.Jup = qn_up['J']
+            self.J = np.append(qn_low['J'], qn_up['J'][-1]).astype(int)
+            self.Jlow = qn_low['J'].astype(int)
+            self.Jup = qn_up['J'].astype(int)
             # omit cuz it leads an error. The transitions are not in order of J transitions but of frequency
             #self.gJ = 2 * self.J + 1
             #self.EJ = np.append(self.Elow, self.Eup[-1])
@@ -195,7 +198,7 @@ class CDMS():
         #self.catrows = data
 
 
-    def params_trans(self, iline, freq=False):
+    def params_trans(self, iline, freq=False, hfs = False):
         '''
         Return parameters of a transition specified by iline.
         iline is the index of the transition in the catalog 
@@ -210,6 +213,9 @@ class CDMS():
         if freq:
             iline = np.argmin((self.freq - iline)**2.) + 1 # get index
 
+        if hfs:
+            return self.params_hfs(iline)
+
         # line Ju --> Jl
         Ju = self.Jup[iline-1]
         Jl = self.Jlow[iline-1]
@@ -221,6 +227,31 @@ class CDMS():
         gl      = 2 * Jl + 1
         Eu     = self.Eup[iline-1]
         El     = self.Elow[iline-1]
+        return trans, freq, Aul, gu, gl, Eu, El
+
+
+    def params_hfs(self, Ju,):
+        '''
+        Return parameters of a transition specified by iline.
+        iline is the index of the transition in the catalog 
+         if 'freq = False', or the frequency of the transition in GHz
+         if 'freq = True'.
+
+        Params
+        ------
+         Ju (int): Upper J.
+        '''
+
+        # line Ju --> Jl
+        indx = self.Jup == Ju
+
+        trans = np.array(self.trans)[indx]
+        freq = self.freq[indx] * 1e9 # Hz
+        Aul     = self.Acoeff[indx]
+        gu      = 2 * Ju + 1
+        gl      = 2 * (Ju - 1) + 1
+        Eu     = self.Eup[indx]
+        El     = self.Elow[indx]
         return trans, freq, Aul, gu, gl, Eu, El
 
 
@@ -366,9 +397,11 @@ def read_cat(path: str, max_rows: Optional[int] = None) -> pd.DataFrame:
                 "NQN": fmt["NQN"],
                 "qn_up": r.qn_up,
                 "qn_lo": r.qn_lo}
+            up_f = _apply_half_integer_flags(r.qn_up, H) # F to half integer
+            lo_f = _apply_half_integer_flags(r.qn_lo, H) # F to half integer
             for i in range(NQN):
-                row.update({labels[i] + '_up': r.qn_up[i]})
-                row.update({labels[i] + '_low': r.qn_lo[i]})
+                row.update({labels[i] + '_up': _fmt_qn(up_f[i])})
+                row.update({labels[i] + '_low': _fmt_qn(lo_f[i])})
             rows.append(row)
     return pd.DataFrame(rows)
 
@@ -458,11 +491,17 @@ def format_transition(qn_up: list,
         return f"{_fmt_qn(Ju)}_{_fmt_qn(Ku)}{EN_DASH}{_fmt_qn(Jl)}_{_fmt_qn(Kl)}"
 
     # --- Format by scheme ---
-    if Q == 1:
+    if (Q == 1) and (NQN == 1):
         # linear rotor: usually NQN=1 with J
         if len(up_f) >= 1 and len(lo_f) >= 1:
             return f"{_fmt_qn(up_f[0])}{EN_DASH}{_fmt_qn(lo_f[0])}"
         return f"?{EN_DASH}?"
+
+    # Q=1, NQN=2 : typically (J, F) for hyperfine linear rotors
+    if (Q == 1) and (NQN == 2):
+        Ju, Fu = up_f
+        Jl, Fl = lo_f
+        return f"{_fmt_qn(Ju)}_{_fmt_qn(Fu)}{EN_DASH}{_fmt_qn(Jl)}_{_fmt_qn(Fl)}"
 
     if Q == 3:
         # asymmetric rotor: (J, Ka, Kc) plus possibly extra tokens (parity/state)
@@ -540,3 +579,39 @@ def _fmt_qn(v: Optional[Fraction]) -> str:
         return str(v.numerator)
     # e.g. 3/2
     return f"{v.numerator}/{v.denominator}"
+
+
+
+def smu2_from_cdms_lgint(
+    lgint: float,
+    freq_MHz: float,
+    Elo_cm1: float,
+    Q_T: float,
+    T: float = 300.0,
+    ) -> float:
+    """
+    Convert CDMS/JPL catalog LGINT (log10 intensity in nm^2 MHz at T)
+    to S*mu^2 in Debye^2 using Pickett's catalog formula.
+    """
+    # I(T) in nm^2 MHz
+    I_T = 10.0 ** lgint
+
+    # Convert energies (cm^-1) -> E/k in Kelvin: (E/k) = (hc/k) * (cm^-1)
+    El_over_k = HC_OVER_K * Elo_cm1
+
+    # Upper state energy in cm^-1: Eu = El + nu/c, with c in cm/s and nu in Hz
+    c_cms = 2.99792458e10
+    nu_Hz = freq_MHz * 1e6
+    dE_cm1 = nu_Hz / c_cms
+    Eu_over_k = HC_OVER_K * (Elo_cm1 + dE_cm1)
+
+    # Boltzmann factor difference: exp(-El/T) - exp(-Eu/T)
+    # Use expm1 for numerical stability: exp(-El/T) * (1 - exp(-(Eu-El)/T))
+    delta = Eu_over_k - El_over_k
+    boltz_diff = np.exp(-El_over_k / T) * (-np.expm1(-delta / T))
+
+    # Pickett constant in nm^2 MHz when freq in MHz and Smu2 in Debye^2
+    C = 4.16231e-5
+
+    Smu2 = (I_T * Q_T) / (C * freq_MHz * boltz_diff)
+    return Smu2

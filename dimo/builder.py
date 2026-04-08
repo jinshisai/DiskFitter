@@ -296,7 +296,7 @@ class Builder(object):
 
 
     def build_cube(self, 
-        Tcmb = 2.73, f0 = 230., 
+        Tcmb = 2.73, f0 = None, 
         dist = 140., dv_mode = 'total', 
         pterm = True, contsub = True, return_Ttau = False):
         #start = time.time()
@@ -311,46 +311,44 @@ class Builder(object):
         # To cube
         #  calculate column density and density-weighted temperature 
         #  of each gas layer at every velocity channel.
+        # line profile function
         if (self.model.dv > 0.) | (dv_mode == 'thermal'):
-            # line profile function
-            #start = time.time()
-            lnprofs = spectra.glnprof_series(self.v, 
-                vlos.ravel(), dv.ravel(), unit_scale = 1.e-5)
-            #end = time.time()
-            #print('making spectra took %.2fs'%(end-start))
-
-            # get nv
-            #start = time.time()
-            nv_g = spectra.to_xyzv(n_g.ravel(), lnprofs)
-            #nv_g = n_g.ravel()[:, np.newaxis] * lnprofs
-            nv_g = nv_g.reshape((self.grid.nxy, self.nz, self.nv))
-            #end = time.time()
-            #print('to xyzv took %.2fs'%(end-start))
-
-
-            #start = time.time()
-            Qrots = self.getQrot(T_g)
-            #end = time.time()
-            #print('get Qrot took %.2fs'%(end-start))
-
-            # to cube
-            #start = time.time()
-            if self.side == 1:
-                Tv_gf, Tv_gr, tau_v_gf, tau_v_gr = transfer.Tnv_to_cube(
-                    T_g, nv_g, self.grid.znest,
-                    self.grid.dznest * auTOcm,
-                    self.freq, self.Aul, self.Eu, self.gu, Qrots)
-            else:
-                Tv_gr, Tv_gf, tau_v_gr, tau_v_gf = transfer.Tnv_to_cube(
-                    T_g, nv_g, self.grid.znest,
-                    self.grid.dznest * auTOcm,
-                    self.freq, self.Aul, self.Eu, self.gu, Qrots)
-            #end = time.time()
-            #print('to cube took %.2fs'%(end-start))
+            lnprofs = spectra.glnprof_series(self.v, vlos.ravel(), dv.ravel(), unit_scale = 1.e-5)
         else:
-            Tv_gf, Tv_gr, Nv_gf, Nv_gr = np.transpose(
-            Tt_to_cube(T_g, n_gf, n_gr, vlos, self.ve, self.grid.dz * auTOcm,),
-            (0,1,3,2,))
+            lnprofs = spectra.boxlnprof_series(self.v, vlos.ravel(), unit_scale = 1.e-5)
+
+        # get nv
+        #start = time.time()
+        nv_g = spectra.to_xyzv(n_g.ravel(), lnprofs)
+        #nv_g = n_g.ravel()[:, np.newaxis] * lnprofs
+        nv_g = nv_g.reshape((self.grid.nxy, self.nz, self.nv))
+        #end = time.time()
+        #print('to xyzv took %.2fs'%(end-start))
+
+
+        #start = time.time()
+        Qrots = self.getQrot(T_g)
+        #end = time.time()
+        #print('get Qrot took %.2fs'%(end-start))
+
+        # to cube
+        #start = time.time()
+        if self.side == 1:
+            Tv_gf, Tv_gr, tau_v_gf, tau_v_gr = transfer.Tnv_to_cube(
+                T_g, nv_g, self.grid.znest,
+                self.grid.dznest * auTOcm,
+                self.freq, self.Aul, self.Eu, self.gu, Qrots)
+        else:
+            Tv_gr, Tv_gf, tau_v_gr, tau_v_gf = transfer.Tnv_to_cube(
+                T_g, nv_g, self.grid.znest,
+                self.grid.dznest * auTOcm,
+                self.freq, self.Aul, self.Eu, self.gu, Qrots)
+        #end = time.time()
+        #print('to cube took %.2fs'%(end-start))
+        #else:
+        #    Tv_gf, Tv_gr, Nv_gf, Nv_gr = np.transpose(
+        #    Tt_to_cube(T_g, n_gf, n_gr, vlos, self.ve, self.grid.dz * auTOcm,),
+        #    (0,1,3,2,))
 
         Tv_gf = Tv_gf.clip(1., None) # safety net to avoid zero division
         Tv_gr = Tv_gr.clip(1., None)
@@ -379,16 +377,17 @@ class Builder(object):
         #Iv = solve_MLRT(_Bv_gf, _Bv_gr, _Bv_d, 
         #    tau_v_gf, tau_v_gr, tau_d, _Bv_cmb, self.nv)
         Iv = solveRT_TL(_Bv_gf, _Bv_gr, _Bv_d, _Bv_cmb,
-            tau_v_gf, tau_v_gr, tau_d,)
+            tau_v_gf, tau_v_gr, tau_d, contsub = contsub)
         #end = time.time()
         #print('radiative transfer took %.2fs'%(end-start))
 
 
         # contsub
-        if contsub == False:
-            Iv_d = (_Bv_d - _Bv_cmb) * (1. - np.exp(- tau_d))
-            Iv_d = np.tile(Iv_d, (self.nv,1,))
-            Iv += Iv_d # add continuum back
+        #if contsub == False:
+        #    Iv_d = (_Bv_d - _Bv_cmb) * (1. - np.exp(- tau_d))
+        #    #Iv_d = np.tile(Iv_d, (self.nv,1,))
+        #    #Iv_d = Iv_d[np.newaxis,:]
+        #    Iv += Iv_d # add continuum back
 
         Iv = np.transpose(
             self.grid.collapse2D(Iv.T, collapse_mode = 'mean'),
@@ -834,13 +833,15 @@ class Builder_SSDisk(object):
 
         # line profile function
         lnprofs = spectra.glnprof_series(self.v, v_proj, dv_proj) # x,y,v
-        Iv = np.tile(I_proj, (self.nv, 1,)) * lnprofs
+        #Iv = np.tile(I_proj, (1, self.nv)) * lnprofs
+        Iv = I_proj[:,np.newaxis] * lnprofs
+        Iv = np.transpose(Iv, axes = (1,0))
         #'''
 
         # collapse
         Iv = self.skygrid.high_dimensional_collapse(Iv, 
             fill = 'zero',
-            collapse_mode = 'mean')
+            collapse_mode = 'mean') # x,y,v
 
         # Convolve beam if given
         if self.beam is not None:
@@ -1186,8 +1187,8 @@ def Bv_Jybeam(T,v,bmaj,bmin):
 
 
 def solveRT_TL(Sv_gf, Sv_gr, Sv_d, Sv_bg,
-    tau_v_gf, tau_v_gr, tau_d):
-    Iv_d = (Sv_d - Sv_bg) * (1. - np.exp(- tau_d))
+    tau_v_gf, tau_v_gr, tau_d, contsub = True):
+    Iv_d = (Sv_d - Sv_bg) * (1. - np.exp(- tau_d)) if contsub else 0.
     Iv = Sv_bg * (
         np.exp(- tau_v_gf - tau_d - tau_v_gr) - 1.) \
             + Sv_gr * (1. - np.exp(- tau_v_gr)) \
