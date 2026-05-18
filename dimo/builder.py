@@ -450,7 +450,8 @@ class Builder(object):
     def show_model_sideview(self, 
         dv_mode='total', pterm = True, cmap = 'viridis', 
         savefig = False, showfig = True, 
-        outname = 'model_sideview', vmax = 1.0, vmin = 1.e-5):
+        outname = 'model_sideview', vmax = 1.0, vmin = 1.e-5,
+        clip_min = 1.e-10):
         T_g, n_g, vlos, dv, T_d, tau_d = self.build_model(
             dv_mode=dv_mode, pterm = pterm)
 
@@ -479,7 +480,8 @@ class Builder(object):
             zmin, zmax = _grid.zlim[l]
 
             d_plt = _grid.collapse(n_g, upto = l)
-            d_plt = np.log10(d_plt) # in log scale
+            d_plt.clip(clip_min, None)    # to avoide -inf
+            d_plt = np.log10(d_plt)       # in log scale
 
             # hide parental layer
             if l <= _grid.nlevels-2:

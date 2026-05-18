@@ -93,8 +93,8 @@ def fastbuild_twocompdisk(R, phi, z, Rmid,
 
 
 @njit(parallel=True)# cache=True)
-def fastbuild_multilayer(R, phi, z, Rmid, 
-    log_N_gc, rc_g, gamma_g, Tg0, qg, 
+def fastbuild_multilayer(R, phi, z, Rmid,
+    log_N_gc, rc_g, gamma_g, Tg0, qg,
     z0, pz, h0, ph,
     log_Sig_dc, rc_d, gamma_d, Td0, qd,
     dv0, pdv, r0,
