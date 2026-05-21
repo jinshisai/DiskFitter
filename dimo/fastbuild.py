@@ -3,7 +3,7 @@ from numba import jit, njit, prange, config
 
 
 @njit(parallel=True)# cache=True)
-def fastbuild_twocompdisk(R, phi, z, Rmid, 
+def fastbuild_twocompdisk(R, phi, z, Rmid,
     log_N_gc, rc_g, gamma_g, Tg0, qg,
     log_Sig_dc, rc_d, gamma_d, Td0, qd,
     dv0, pdv, r0,
@@ -172,7 +172,8 @@ def fastbuild_multilayer(R, phi, z, Rmid,
 
 
 @njit(parallel=True)# cache=True)
-def fastbuild_twocompdisk_brokendvpower(R, phi, z, Rmid, 
+def fastbuild_twocompdisk_brokendvpower(
+    R, phi, z, Rmid,
     log_N_gc, rc_g, gamma_g, Tg0, qg,
     log_Sig_dc, rc_d, gamma_d, Td0, qd,
     dv0, pdv, rb_dv, pdv_out, r0,
