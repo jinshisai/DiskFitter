@@ -975,7 +975,7 @@ class DiMO(object):#, FitThinModel):
         nwalkers=None, nrun=2000, nburn=1000, labels=[], show_progress=True,
         optimize_ini=False, moves = emcee.moves.StretchMove(),
         symmetric_error=False, npool = 1, f_rand_init = 1.,
-        show_results = True):
+        show_results = True, restart = False):
         axes = [x, y, z, v]
         # drop unecessary axis
         d = np.squeeze(d)
@@ -1119,7 +1119,7 @@ class DiMO(object):#, FitThinModel):
             nwalkers = nwalkers, nrun = nrun, nburn = nburn, labels = labels,
             show_progress = show_progress, optimize_ini = optimize_ini, moves = moves,
             symmetric_error = symmetric_error, npool = npool, f_rand_init = f_rand_init,
-            show_results = show_results)
+            show_results = show_results, restart = restart)
         self.pfit = BE.pfit.copy()
         self.popt = BE.pfit[0]
         self.perr = BE.pfit[1:]
