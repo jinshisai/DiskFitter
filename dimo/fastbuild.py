@@ -131,7 +131,7 @@ def fastbuild_multilayer(R, phi, z, Rmid,
         linewidth = lambda r, dv0, r0, pdv, kb, Tg, mmol, mH: \
         linewidth_tnt(r, dv0, r0, pdv, kb, Tg, mmol, mH)
 
-
+    # gas
     for i in prange(nd):
         Ri = R[i]
         phii = phi[i]
@@ -160,7 +160,7 @@ def fastbuild_multilayer(R, phi, z, Rmid,
         # dv
         dv[i] = linewidth(Ri, dv0, r0, pdv, kb, T, mmol, mH)
 
-
+    # dust
     for i in prange(ndd):
         Rmidi = Rmid[i]
         T_d[i] = Td0 * (Rmidi / r0)**(-qd)

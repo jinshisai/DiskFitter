@@ -218,8 +218,8 @@ class TwoComponentDisk:
         T (array): Gas temperature (K)
         pterm (bool): If include the pressure gradient term or not.
         '''
-        vphi = vrot_ssdisk(R * auTOcm, self.ms * Msun, T, 
-            self.rc_g * auTOcm, self.gamma_g, self.qg, 
+        vphi = vrot_ssdisk(R * auTOcm, self.ms * Msun, T,
+            self.rc_g * auTOcm, self.gamma_g, self.qg,
             z = z * auTOcm, pterm = pterm, mu = mu)
         return vphi * np.cos(phi) * np.sin(self._inc_rad) * 1.e-5 + self.vsys # cm/s --> km/s
 
@@ -268,7 +268,7 @@ class TwoComponentDisk:
          R (float or ndarray): Cylindrical radius (au).
          Tg (float or ndarray): Gas temperature to be used when dv_mode = 'thermal'.
          dv_mode (strings): Type of line widths. 'total' or 'thermal'.
-          If 'total', the line width is regarded as a total line width 
+          If 'total', the line width is regarded as a total line width
           including any types of line broadening. If 'thermal', the thermal broadening is calculated
           with the input gas temperature, and the line width modeled as a power-law function is regarded as
           the nonthermal component.
@@ -304,8 +304,8 @@ class TwoComponentDisk:
         return ssdisk(R, 10.**self.log_tau_dc, self.rc_d, self.gamma_d, beta = None)
 
 
-    def build(self, R, phi, z, Rmid, 
-        dv_mode = 'total', 
+    def build(self, R, phi, z, Rmid,
+        dv_mode = 'total',
         mmol = 30., mu = 2.34, pterm = True,):
         '''
         Build up model and return parameters for solving the radiative transfer.
@@ -317,7 +317,7 @@ class TwoComponentDisk:
          z (ndarray): Three dimensional array of vertical heights (au).
          R (ndarray): Two dimensional array of cylindrical radii (au).
          dv_mode (strings): Type of line widths. 'total' or 'thermal'.
-          If 'total', the line width is regarded as a total line width 
+          If 'total', the line width is regarded as a total line width
           including any types of line broadening. If 'thermal', the thermal broadening is calculated
           with the input gas temperature, and the line width modeled as a power-law function is regarded as
           the nonthermal component.
@@ -327,13 +327,13 @@ class TwoComponentDisk:
          pterm (bool): Whether including the pressure gradient term or not in calculations of rotational velocities.
         '''
         return self.fastbuild(
-            R, phi, z, Rmid, 
-            dv_mode = dv_mode, 
+            R, phi, z, Rmid,
+            dv_mode = dv_mode,
             mmol = mmol, mu = mu, pterm = pterm)
 
 
-    def fastbuild(self, R, phi, z, Rmid, 
-        dv_mode = 'total', 
+    def fastbuild(self, R, phi, z, Rmid,
+        dv_mode = 'total',
         mmol = 30., mu = 2.34, pterm = True,):
         '''
         Faster verion of build.
@@ -342,7 +342,7 @@ class TwoComponentDisk:
         shape_d = Rmid.shape
 
         T_g, n_g, vlos, dv, T_d, tau_d = \
-        fastbuild_twocompdisk(R.ravel(), phi.ravel(), z.ravel(), Rmid.ravel(), 
+        fastbuild_twocompdisk(R.ravel(), phi.ravel(), z.ravel(), Rmid.ravel(),
             self.log_N_gc, self.rc_g, self.gamma_g, self.Tg0, self.qg,
             self.log_tau_dc, self.rc_d, self.gamma_d, self.Td0, self.qd,
             self.dv, self.pdv, self.r0,
@@ -407,11 +407,11 @@ class MultiLayerDisk:
     _side: int = np.sign(np.cos(_inc_rad)) # cos(-i) = cos(i)
 
 
-    def set_params(self, 
-        Td0 = 400., qd = 0.5, log_tau_dc = 0., rc_d = 100., gamma_d = 1., 
+    def set_params(self,
+        Td0 = 400., qd = 0.5, log_tau_dc = 0., rc_d = 100., gamma_d = 1.,
         Tg0 = 400., qg = 0.5, #f_Tg0 = 1., d_qg = 0.,
-        log_N_gc = 0., rc_g = 100., gamma_g = 1., 
-        z0 = 0., pz = 1.25, h0 = 0., ph = 0., inc = 0., pa = 0., ms = 1., vsys = 0, 
+        log_N_gc = 0., rc_g = 100., gamma_g = 1.,
+        z0 = 0., pz = 1.25, h0 = 0., ph = 0., inc = 0., pa = 0., ms = 1., vsys = 0,
         dx0=0., dy0=0., r0 = 1., dv = 0., pdv = 0.25):
         '''
 
@@ -530,7 +530,7 @@ class MultiLayerDisk:
 
     def gas_velocity(self, R, phi, z, T, pterm = True, mu = 2.34):
         '''
-        Calculate line-of-sight velocity, i.e., 
+        Calculate line-of-sight velocity, i.e.,
         projection of the rotational velocity.
 
         Parameters
@@ -543,8 +543,8 @@ class MultiLayerDisk:
         '''
         #vphi = vrot(R * auTOcm, self.ms * Msun, rho, T,
         #    z = z * auTOcm, pterm = pterm, mu = mu,)
-        vphi = vrot_ssdisk(R * auTOcm, self.ms * Msun, T, 
-            self.rc_g * auTOcm, self.gamma_g, self.qg, 
+        vphi = vrot_ssdisk(R * auTOcm, self.ms * Msun, T,
+            self.rc_g * auTOcm, self.gamma_g, self.qg,
             z = z * auTOcm, pterm = pterm, mu = mu)
         return vphi * np.cos(phi) * np.sin(self._inc_rad) * 1.e-5 + self.vsys # cm/s --> km/s
 
@@ -634,23 +634,23 @@ class MultiLayerDisk:
         return ssdisk(R, 10.**self.log_tau_dc, self.rc_d, self.gamma_d, beta = None)
 
 
-    def build(self, R, phi, z, Rmid, 
+    def build(self, R, phi, z, Rmid,
         dv_mode = 'total', mmol = 30., mu = 2.34, pterm = True,):
         '''
-        deproject_grid frist.
+        Build the model. deproject_grid frist.
         '''
-        return self.fastbuild(R, phi, z, Rmid, 
-        dv_mode = 'total', mmol = 30., mu = 2.34, pterm = True,)
+        return self.fastbuild(R, phi, z, Rmid,
+        dv_mode = dv_mode, mmol = mmol, mu = mu, pterm = pterm,)
 
 
-    def fastbuild(self, R, phi, z, Rmid, 
-        dv_mode = 'total', 
+    def fastbuild(self, R, phi, z, Rmid,
+        dv_mode = 'total',
         mmol = 30., mu = 2.34, pterm = True,):
         shape = R.shape
         shape_d = Rmid.shape
 
         T_g, n_g, vlos, dv, T_d, tau_d = \
-        fastbuild_multilayer(R.ravel(), phi.ravel(), z.ravel(), Rmid.ravel(), 
+        fastbuild_multilayer(R.ravel(), phi.ravel(), z.ravel(), Rmid.ravel(),
             self.log_N_gc, self.rc_g, self.gamma_g, self.Tg0, self.qg,
             self.z0, self.pz, self.h0, self.ph,
             self.log_tau_dc, self.rc_d, self.gamma_d, self.Td0, self.qd,
@@ -664,8 +664,6 @@ class MultiLayerDisk:
 
     def side(self):
         return self._side
-
-
 
 
 @dataclass(slots=True)
